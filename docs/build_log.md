@@ -1,5 +1,153 @@
 # Build log
 
+## 2026-08-02 — app.py driven by the LangGraph pipeline, with a legacy fallback
+
+### Why
+
+The prior entry added `src/graph/` specifically to replace hand-rolled
+pause/resume with LangGraph's `interrupt()`/`Command(resume=...)` -- but only
+`scripts/run_pipeline.py` actually used it. `app.py` still ran its own
+version of the thing the graph exists to replace: results stashed in
+`st.session_state`, a `stage` marker, and a full script rerun to advance.
+Streamlit's own flow -- show options, wait for a click, continue -- maps
+directly onto `interrupt()`/`Command(resume=...)`, so this closes that gap.
+
+### What changed
+
+`app.py` now drives `src/graph/pipeline.py` as its PRIMARY path for both
+input tabs, with the entire previous implementation kept, unmodified, as an
+automatic fallback (see Constraints below). The three screens
+(`render_input`, `render_category_confirmation`, `render_results`) needed
+**zero changes** -- the new graph-backed functions populate the exact same
+`st.session_state` keys, in the exact same types
+(`extraction`: dict, `resolution`: `ResolutionResult`,
+`category_results`: `list[CategoryResult]`, `verdict`/`preview_verdict`:
+`ProductVerdict`, etc.) the legacy functions already did, so the render
+functions and the "Back to category confirmation" button needed no
+awareness of which backend produced them.
+
+- **`_get_graph()`** -- `build_pipeline(auto_confirm=False)` behind
+  `@st.cache_resource`, the same pattern already used three times in this
+  file for the embedder/corpus/extractor. Verified (not assumed) that this
+  actually holds across reruns: a throwaway `st.cache_resource`-decorated
+  probe run through `AppTest.run()` three times in a row returned the
+  identical object and incremented its call counter exactly once. A fresh
+  checkpointer per rerun would have silently lost every paused thread.
+- **`_invoke_fresh_graph_attempt()`** -- runs extract → resolve → classify →
+  confirm on a NEW thread (`{run_id}-{attempt}`) each time it's called,
+  reaching the SAME interrupt fresh. This is the one piece of real design
+  work beyond wiring: verified directly (two throwaway scripts against the
+  installed langgraph, before writing any app.py code) that
+  `Command(resume=...)` resolves a paused checkpoint's interrupt exactly
+  once -- invoking it a second time at the same checkpoint does NOT
+  re-pause with a new value, it just returns the first resume's already-
+  computed result. So re-confirming after "Back" needs a fresh thread, not
+  a replay of the old one. This costs no extra API call: `GeminiExtractor`
+  and `GeminiEmbedder` each cache by exact input on disk already, so
+  identical input on a new thread is a cache hit.
+- **`_finalise_graph(choices)`** -- resumes the current thread's interrupt
+  (starting a fresh attempt first if this is a re-confirmation, via
+  `graph_resumed`), then reads verdict/substitutes/horizon/narration
+  straight off the returned state -- `src/graph/nodes.py` already ran
+  evaluate/find_substitutes/find_horizon_signals/narrate. Only the
+  DISPLAY-only steps `_finalise` already did outside of any node
+  (additive-name backfill via `_enrich_additive_names`, the
+  pre-confirmation preview verdict for the verdict-strip merge) are
+  repeated here, unchanged, since nothing in `src/graph/` does UI display
+  work.
+- **`_ordered_category_results(result)`** -- the graph's
+  `state["category"]` is a dict (keyed by component_label, merged via
+  `Send` fan-out), not the declaration-ordered list the screens expect.
+  Calls `build_queries` again -- pure, already imported, never rescored --
+  purely to recover the same order the direct pipeline's list was already
+  in.
+- Category resume keys use `PRODUCT_SCOPE_KEY` (`"(product)"`, imported
+  from `src.graph.nodes`), not `None`, to match `confirmed_categories`'
+  own convention -- translated from `render_category_confirmation`'s
+  existing `None`-keyed `choices` dict inside `_finalise_graph`, so
+  `_apply_category_confirmations`/`render_category_confirmation` needed no
+  changes either.
+
+### Constraints honoured
+
+- **`scripts/run_pipeline.py` and every standalone script are untouched.**
+  Nothing in `src/graph/` changed; `app.py` only gained new call sites into
+  it.
+- **Fallback, not a crash, on any graph failure.** Every graph entry point
+  is wrapped by a `_dispatch_*` function: `_dispatch_run_from_image`,
+  `_dispatch_run_from_text`, `_dispatch_confirm`. Each tries the graph
+  path, and on ANY exception (build failure, node error surfaced via
+  `state["errors"]`, an unexpected re-interrupt) calls `_graph_fallback`
+  (sets `graph_broken`, shown once via `st.warning`, so a systemic failure
+  -- e.g. no `GOOGLE_API_KEY` -- doesn't retry and fail slowly on every
+  click) and falls through to the ORIGINAL, unmodified
+  `_run_pipeline_from_image`/`_run_pipeline_from_text`/`_finalise` in the
+  same request. This works cleanly specifically because the graph path
+  populates `st.session_state` in the legacy path's own types (see above)
+  -- a graph success followed by a `_finalise_graph` failure can fall back
+  to legacy `_finalise` mid-flow using data already in the right shape.
+  Whether a screening is graph-backed is tracked implicitly by
+  `"graph_config" in st.session_state`, not a separate boolean, so a
+  fallback screening can never accidentally be treated as resumable.
+- **Back still works, including recomputing on a different choice.** "Back
+  to category confirmation" itself needed no change -- it already just
+  flips `stage` back without discarding `category_results`, which is
+  backend-agnostic. Re-confirming a SECOND time (the actual "different
+  choice" case) is what needed `_invoke_fresh_graph_attempt`'s fresh-thread
+  handling, described above.
+
+### Verified, not just written
+
+- `AppTest` (Streamlit's own headless test harness) end to end against the
+  REAL app.py, REAL graph, REAL `data/labels/Parle-Gmain.jpeg` (no mocks):
+  upload → Run screening → accept rank-1 for both queries (product 11.1,
+  component 11.2) → Confirm and continue → **3 blocking items
+  ([7, 8, 11])** → Back to category confirmation → override the product
+  query to 7.2 via the existing "Choose another category" selectbox →
+  Confirm and continue → **0 blocking items**. Exactly the task's Verify
+  scenario, and `graph_config` was present (not fallen back) at both
+  results screens.
+- Cross-checked against `scripts/run_pipeline.py
+  data/labels/Parle-Gmain.jpeg --auto-confirm`: byte-identical summary
+  line ("3 item(s) NOT PERMITTED (item_id [7, 8, 11])... product = 11.1").
+  `data/outputs/*/Parle-Gmain.json` (gitignored) were restored to their
+  prior 7.2-confirmed state afterward via `scripts/verdict.py --category
+  7.2` + `scripts/substitutes.py`/`scripts/horizon.py`.
+- Fallback path, separately, in a fresh process (so `st.cache_resource`
+  had no prior successful graph cached): patched
+  `src.graph.pipeline.build_pipeline` to raise, ran the same Parle-Gmain
+  flow through `AppTest`. Confirmed: `graph_config` absent throughout,
+  `graph_broken` set, and the LEGACY path alone still reached results with
+  the same correct outcome (blocking `[7, 8, 11]` at rank-1) -- the demo
+  surface degrades, it does not break.
+- `uv run pytest` -- 246 passed (unchanged from the prior entry; no new
+  test file was added for this task, since `tests/test_graph.py` already
+  covers `src/graph/` and app.py is UI glue exercised above via `AppTest`
+  instead).
+- `uv run ruff check .` -- unchanged: 27 pre-existing errors, all in
+  `src/codex/run_codex.py`; `app.py` itself is clean.
+
+### Anything unexpected
+
+- **`Command(resume=...)` cannot re-pause an already-resolved checkpoint
+  with a different value.** Assumed at first that "Back" could simply
+  invoke the ORIGINAL paused thread a second time with a new choice
+  (genuine LangGraph "time travel"). A throwaway script proved otherwise:
+  resuming the same checkpoint twice silently returns the FIRST resume's
+  result both times, ignoring the second value. This is why
+  `_invoke_fresh_graph_attempt` exists and why re-confirmation needs a
+  fresh thread rather than a replay -- worth flagging since it's the one
+  piece of this task that didn't work the way the LangGraph docs'
+  "time-travel" framing suggests it should from a config with an explicit
+  past `checkpoint_id`.
+- Resource duplication, accepted deliberately: the graph-backed path
+  (`build_pipeline`) and the legacy path (`_load_references`/
+  `_load_category_scorer`/`_get_extractor`) each load their own copy of
+  every reference dataset and embed their own copy of the category corpus.
+  Keeping them fully independent is what makes the fallback a REAL
+  fallback -- sharing state would mean a broken graph could take the
+  legacy path down with it.
+
 ## 2026-08-02 — LangGraph orchestration layer over the existing pipeline
 
 ### Why

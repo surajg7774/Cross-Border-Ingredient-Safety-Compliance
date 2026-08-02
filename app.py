@@ -31,11 +31,13 @@
 import html
 import json
 import tempfile
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import streamlit as st
+from langgraph.types import Command
 
 from config import settings
 from src.category.classifier import build_queries, classify, item_component_labels
@@ -45,6 +47,8 @@ from src.category.experiment import CONFIGS
 from src.category.schemas import CategoryCandidate, CategoryResult
 from src.extract.text_parser import parse_declaration
 from src.extractors.gemini import GeminiExtractor
+from src.graph.nodes import PRODUCT_SCOPE_KEY
+from src.graph.pipeline import build_pipeline
 from src.horizon.lane import find_horizon_signals
 from src.horizon.load import load_horizon_meta, load_horizon_signals
 from src.horizon.schemas import HorizonResult
@@ -53,7 +57,7 @@ from src.report.email import EmailAttachment, SmtpConfig, send_report, test_conn
 from src.report.export import ReportIdentity, to_csv, to_json, to_pdf
 from src.report.narrator import Narration, narrate
 from src.resolve.resolver import References, resolve_items
-from src.resolve.schemas import ResolvedItem
+from src.resolve.schemas import ResolutionResult, ResolvedItem
 from src.rules.engine import evaluate
 from src.rules.schemas import ProductVerdict
 from src.schemas import GateResult
@@ -138,6 +142,321 @@ def _load_category_scorer():
 @st.cache_resource(show_spinner=False)
 def _get_extractor() -> GeminiExtractor:
     return GeminiExtractor(settings.PRIMARY_MODEL)
+
+
+# =========================================================================== #
+# graph-backed pipeline -- PRIMARY path, src/graph/pipeline.py driving the
+# SAME screens below. Falls back to the direct-call pipeline (the functions
+# under "stage 1"/"stage 2" further down) on any failure -- this app is the
+# demo surface and must not break; see _graph_should_attempt/_graph_fallback
+# and every _dispatch_* function.
+#
+# THE PAUSE IS STILL THE POINT, now via LangGraph's interrupt()/
+# Command(resume=...) instead of the hand-rolled stage marker: confirm_node
+# (src/graph/nodes.py) pauses the graph exactly where category_confirm used
+# to pause the state machine, and _finalise_graph resumes it. See
+# docs/build_log.md for why (measured category recall@1 ~0.53).
+# =========================================================================== #
+@st.cache_resource(show_spinner="Loading the LangGraph pipeline…")
+def _get_graph():
+    """Built ONCE per server process and cached -- st.cache_resource returns
+    the SAME compiled graph (and therefore the SAME InMemorySaver) on every
+    Streamlit rerun. A fresh checkpointer per rerun would silently lose
+    every paused thread's state; a fresh EXTRACTOR/embedder per rerun would
+    also re-pay the corpus-embedding cost on every widget interaction --
+    both are exactly what st.cache_resource is for, the same pattern
+    _load_references/_load_category_scorer/_get_extractor above already
+    rely on for their own expensive resources."""
+    return build_pipeline(auto_confirm=False)
+
+
+def _graph_should_attempt() -> bool:
+    return not st.session_state.get("graph_broken", False)
+
+
+def _graph_fallback(exc: Exception) -> None:
+    """Record the failure and drop back to the direct pipeline for the rest
+    of THIS request. `graph_broken` persists for the session (not reset
+    until "New screening") so a systemic failure -- e.g. no GOOGLE_API_KEY
+    -- does not retry, and fail slowly, on every single click."""
+    st.session_state.graph_broken = True
+    st.session_state.pop("graph_config", None)
+    st.warning(
+        "The LangGraph-backed pipeline hit a problem and this run is using the direct "
+        f"pipeline instead: {exc}"
+    )
+
+
+def _graph_initial_state(
+    label_path: str | None, text_input: str | None, name: str, description: str | None
+) -> dict:
+    return {
+        "label_path": label_path,
+        "text_input": text_input,
+        "name": name,
+        "description": description,
+        "extraction": None,
+        "resolution": None,
+        "category": {},
+        "confirmed_categories": {},
+        "verdict": None,
+        "substitutes": None,
+        "horizon": None,
+        "narration": None,
+        "errors": [],
+    }
+
+
+def _invoke_fresh_graph_attempt() -> dict:
+    """(Re)run extract -> resolve -> classify -> confirm on a NEW thread,
+    reaching the SAME interrupt fresh, and record its config as the current
+    one. Used both for the first run of a screening and to re-arm
+    confirmation after a "Back to category confirmation" (see
+    _finalise_graph): LangGraph's own resume mechanism resolves a paused
+    checkpoint's interrupt exactly once -- calling Command(resume=...)
+    again at the SAME checkpoint does not re-pause it with a new value,
+    verified directly against the installed langgraph version before relying
+    on it here. A fresh thread each time sidesteps that entirely, and costs
+    no extra API call: run_extraction (GeminiExtractor) and the embedder
+    (GeminiEmbedder) each have their own on-disk cache keyed by exact input,
+    so re-running identical input against them is a cache hit, not a new
+    call.
+
+    Raises if the graph does not pause at "confirm" as expected (e.g. the
+    graph reported an internal error) -- the caller's try/except is what
+    triggers the fallback to the direct pipeline.
+    """
+    graph, _refs = _get_graph()
+    st.session_state.graph_attempt = st.session_state.get("graph_attempt", 0) + 1
+    thread_id = f"{st.session_state.graph_run_id}-{st.session_state.graph_attempt}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    source = st.session_state.graph_source
+    if source["kind"] == "image":
+        with tempfile.NamedTemporaryFile(delete=False, suffix=source["suffix"]) as tmp:
+            tmp.write(source["bytes"])
+        image_path = Path(tmp.name)
+        try:
+            state = _graph_initial_state(
+                str(image_path), None, st.session_state.graph_name, st.session_state.graph_description
+            )
+            result = graph.invoke(state, config)
+        finally:
+            image_path.unlink(missing_ok=True)
+    else:
+        state = _graph_initial_state(
+            None, source["text"], st.session_state.graph_name, st.session_state.graph_description
+        )
+        result = graph.invoke(state, config)
+
+    if result.get("errors"):
+        raise RuntimeError("; ".join(result["errors"]))
+    if "__interrupt__" not in result:
+        raise RuntimeError("graph did not pause for category confirmation as expected")
+
+    st.session_state.graph_config = config
+    return result
+
+
+def _ordered_category_results(result: dict) -> list[CategoryResult]:
+    """The graph's state["category"] (a dict keyed by component_label, or
+    PRODUCT_SCOPE_KEY for the product-scope query -- see
+    src/graph/nodes.py's classify_node) reordered to match build_queries'
+    own declaration order, the same order the legacy pipeline's
+    category_results list is already in. Calls build_queries again purely
+    to recover that order -- pure, cheap, already imported here for the
+    direct pipeline below; never rescored."""
+    items = result["extraction"]["extraction"]["items"]
+    resolved_items = [ResolvedItem.model_validate(i) for i in result["resolution"]["items"]]
+    gate = result["extraction"]["gate"]
+    queries = build_queries(
+        items,
+        resolved_items,
+        gate.get("product_name"),
+        gate.get("product_descriptor"),
+        _CATEGORY_CONFIG,
+        st.session_state.graph_description,
+    )
+    order = [(q.scope, q.component_label) for q in queries]
+    by_key = {}
+    for payload in result["category"].values():
+        parsed = CategoryResult.model_validate(payload)
+        by_key[(parsed.query.scope, parsed.component_label)] = parsed
+    return [by_key[key] for key in order if key in by_key]
+
+
+def _run_pipeline_from_image_graph(uploaded, description: str) -> None:
+    st.session_state.source_filename = uploaded.name
+    st.session_state.graph_source = {
+        "kind": "image",
+        "bytes": uploaded.getvalue(),
+        "suffix": Path(uploaded.name).suffix or ".jpg",
+    }
+    st.session_state.graph_name = uploaded.name
+    st.session_state.graph_description = description or None
+    st.session_state.graph_run_id = uuid.uuid4().hex
+    st.session_state.graph_attempt = 0
+    st.session_state.graph_resumed = False
+
+    with st.status("Running screening…", expanded=True) as status:
+        status.write("Reading the label, resolving identities, and retrieving categories…")
+        result = _invoke_fresh_graph_attempt()
+
+        extraction_payload = result["extraction"]
+        if extraction_payload is None or extraction_payload["extraction"] is None:
+            status.update(label="Could not extract this label", state="error")
+            st.error((extraction_payload or {}).get("stop_reason") or "Could not extract this label.")
+            return
+        items = extraction_payload["extraction"]["items"]
+        if not items:
+            status.update(label="Nothing to check", state="error")
+            st.error(extraction_payload.get("stop_reason") or "No items were extracted.")
+            return
+
+        category_results = _ordered_category_results(result)
+        status.write(f"{len(items)} item(s) extracted")
+        status.write(f"{len(category_results)} categor{'y' if len(category_results) == 1 else 'ies'} to confirm")
+        status.update(label="Ready — confirm the food category next", state="complete")
+
+    st.session_state.extraction = extraction_payload
+    st.session_state.resolution = ResolutionResult.model_validate(result["resolution"])
+    st.session_state.category_results = category_results
+    st.session_state.product_label = extraction_payload["gate"].get("product_name") or "Screening result"
+    st.session_state.stage = "category_confirm"
+    st.rerun()
+
+
+def _run_pipeline_from_text_graph(text: str, description: str) -> None:
+    st.session_state.source_filename = None
+    st.session_state.graph_source = {"kind": "text", "text": text}
+    # Same falsy-fallback as legacy's gate.product_name=None (see
+    # _run_pipeline_from_text): extract_node sets gate.product_name to this
+    # verbatim, but every display site reads it via `or "Screening result"`
+    # / `or source_filename`, so "" behaves identically to None there.
+    st.session_state.graph_name = ""
+    st.session_state.graph_description = description or None
+    st.session_state.graph_run_id = uuid.uuid4().hex
+    st.session_state.graph_attempt = 0
+    st.session_state.graph_resumed = False
+
+    with st.status("Running screening…", expanded=True) as status:
+        status.write("Parsing, resolving identities, and retrieving categories…")
+        result = _invoke_fresh_graph_attempt()
+
+        extraction_payload = result["extraction"]
+        items = extraction_payload["extraction"]["items"] if extraction_payload else []
+        if extraction_payload and extraction_payload["extraction"]["unparsed_fragments"]:
+            st.warning(
+                f"{len(extraction_payload['extraction']['unparsed_fragments'])} fragment(s) could not be "
+                "parsed: " + "; ".join(extraction_payload["extraction"]["unparsed_fragments"])
+            )
+        if not items:
+            status.update(label="Nothing to check", state="error")
+            st.error("No items were parsed from the pasted text.")
+            return
+
+        category_results = _ordered_category_results(result)
+        status.write(f"{len(items)} item(s) parsed")
+        status.write(f"{len(category_results)} categor{'y' if len(category_results) == 1 else 'ies'} to confirm")
+        status.update(label="Ready — confirm the food category next", state="complete")
+
+    st.session_state.extraction = extraction_payload
+    st.session_state.resolution = ResolutionResult.model_validate(result["resolution"])
+    st.session_state.category_results = category_results
+    st.session_state.product_label = extraction_payload["gate"].get("product_name") or "Screening result"
+    st.session_state.stage = "category_confirm"
+    st.rerun()
+
+
+def _finalise_graph(choices: dict[str | None, CategoryCandidate]) -> None:
+    """The graph-backed twin of _finalise: resume confirm_node's interrupt
+    with the chosen categories, then read verdict/substitutes/horizon/
+    narration straight off the returned state -- src/graph/nodes.py already
+    ran evaluate/find_substitutes/find_horizon_signals/narrate for us. Only
+    the display-only enrichment/preview steps below (additive-name
+    backfill, the pre-confirmation preview verdict) are NOT something a
+    node does -- same as _finalise, these are app.py's own display
+    concerns, not compliance logic, so they are recomputed here exactly as
+    _finalise already does.
+
+    If this is a RE-confirmation (the user went back and is confirming a
+    different choice), the original thread's interrupt is already resolved
+    -- see _invoke_fresh_graph_attempt's docstring -- so a fresh attempt is
+    started first, reaching the SAME interrupt again before resuming it
+    with the new choice.
+    """
+    graph, _refs = _get_graph()
+    if st.session_state.get("graph_resumed"):
+        _invoke_fresh_graph_attempt()
+
+    resume = {(PRODUCT_SCOPE_KEY if key is None else key): candidate.code for key, candidate in choices.items()}
+    with st.spinner("Computing the verdict…"):
+        result = graph.invoke(Command(resume=resume), st.session_state.graph_config)
+    if "__interrupt__" in result:
+        raise RuntimeError("graph paused again unexpectedly while finalising")
+    if result.get("errors"):
+        raise RuntimeError("; ".join(result["errors"]))
+
+    refs = _load_references()
+    resolved_items = [ResolvedItem.model_validate(i) for i in result["resolution"]["items"]]
+    resolved_by_id = {r.item_id: r for r in resolved_items}
+    canonical_ins_by_item = {r.item_id: r.canonical_ins for r in resolved_items if r.canonical_ins}
+    codex_names = {row["ins"]: row["name"] for row in refs.codex_ins}
+    extraction_items = result["extraction"]["extraction"]["items"]
+    item_labels = item_component_labels(extraction_items, resolved_by_id)
+
+    verdict = ProductVerdict.model_validate(result["verdict"])
+    extraction_names = _extraction_names(result["extraction"])
+    verdict = _enrich_additive_names(verdict, extraction_names, canonical_ins_by_item, codex_names)
+
+    # DISPLAY ONLY -- same purpose as _finalise's own preview_verdict (see
+    # its comment): the pre-confirmation candidates, recomputed with the
+    # SAME pure evaluate() call, never used for blocking/summary/anything
+    # but the verdict-strip merge in render_results.
+    preview_item_category_map, _unused = _apply_category_confirmations(
+        st.session_state.category_results, {}, resolved_items, item_labels
+    )
+    preview_verdict = evaluate(resolved_items, preview_item_category_map, refs.eu_fip, frozenset())
+
+    st.session_state.verdict = verdict
+    st.session_state.preview_verdict = preview_verdict
+    st.session_state.horizon_result = HorizonResult.model_validate(result["horizon"])
+    st.session_state.substitute_result = SubstituteResult.model_validate(result["substitutes"])
+    st.session_state.narration = Narration.model_validate(result["narration"])
+    st.session_state.run_timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    st.session_state.graph_resumed = True
+    st.session_state.stage = "results"
+    st.rerun()
+
+
+def _dispatch_run_from_image(uploaded, description: str) -> None:
+    if _graph_should_attempt():
+        try:
+            _run_pipeline_from_image_graph(uploaded, description)
+            return
+        except Exception as exc:  # noqa: BLE001 -- ANY graph failure must fall back, not break the app
+            _graph_fallback(exc)
+    _run_pipeline_from_image(uploaded, description)
+
+
+def _dispatch_run_from_text(text: str, description: str) -> None:
+    if _graph_should_attempt():
+        try:
+            _run_pipeline_from_text_graph(text, description)
+            return
+        except Exception as exc:  # noqa: BLE001
+            _graph_fallback(exc)
+    _run_pipeline_from_text(text, description)
+
+
+def _dispatch_confirm(choices: dict[str | None, CategoryCandidate]) -> None:
+    if "graph_config" in st.session_state and _graph_should_attempt():
+        try:
+            _finalise_graph(choices)
+            return
+        except Exception as exc:  # noqa: BLE001
+            _graph_fallback(exc)
+    _finalise(choices)
 
 
 def _save_upload(uploaded) -> Path:
@@ -246,6 +565,14 @@ def _reset_session() -> None:
         "horizon_result",
         "substitute_result",
         "narration",
+        "graph_config",
+        "graph_run_id",
+        "graph_attempt",
+        "graph_resumed",
+        "graph_source",
+        "graph_name",
+        "graph_description",
+        "graph_broken",
     ):
         st.session_state.pop(key, None)
     st.session_state.stage = "input"
@@ -278,7 +605,7 @@ def render_input() -> None:
         if st.button(
             "Run screening", key="run_upload", type="primary", disabled=uploaded is None
         ):
-            _run_pipeline_from_image(uploaded, description_u)
+            _dispatch_run_from_image(uploaded, description_u)
 
     with tab_text:
         text = st.text_area(
@@ -293,7 +620,7 @@ def render_input() -> None:
         if st.button(
             "Run screening", key="run_text", type="primary", disabled=not text.strip()
         ):
-            _run_pipeline_from_text(text, description_t)
+            _dispatch_run_from_text(text, description_t)
 
 
 def _continue_pipeline(status, extraction_payload: dict, description: str, refs: ReferenceData) -> bool:
@@ -618,7 +945,7 @@ def render_category_confirmation() -> None:
         st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
 
     if st.button("Confirm and continue", type="primary"):
-        _finalise(choices)
+        _dispatch_confirm(choices)
 
 
 # =========================================================================== #
