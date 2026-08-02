@@ -1,0 +1,300 @@
+{
+  "_meta": {
+    "review_status": "FILLED -- answers decided by hand, 2026-08-02",
+    "n_items": 22,
+    "purpose": "Ground truth for scripts/score_agent.py. For each item, fill in answer.outcome as either \"identified\" (and set answer.canonical_ins + answer.classification to the correct values) or \"correctly_declined\" (the label genuinely does not determine an identity -- leave canonical_ins/classification null). Leaving outcome null means the item has not been reviewed yet and score_agent.py should skip it, not score it as a miss.",
+    "excluded": [
+      "GraphTestChips"
+    ],
+    "excluded_reason": "scratch/test data from LangGraph pipeline development, not a curated label",
+    "method": "Each answer was decided by reading the item name and its source label. Ordinary foods are 'identified' with a null canonical_ins, since food ingredients have no INS number. Items where the label genuinely does not determine which additive is meant are 'correctly_declined'."
+  },
+  "items": [
+    {
+      "label": "Chipsmain",
+      "item_id": 4,
+      "name_as_declared": "Spices and Condiments (Contains Chilli)",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "A spice blend. The bracket is a descriptor, not a sub-ingredient."
+    },
+    {
+      "label": "Chipsraw",
+      "item_id": 4,
+      "name_as_declared": "Contains Chilli",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Parenthetical descriptor extracted as an item; chilli is a spice."
+    },
+    {
+      "label": "Chocolatemain",
+      "item_id": 4,
+      "name_as_declared": "Cocos Solids",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Cocoa solids. 'Cocos' is a typo printed on the promotional graphic."
+    },
+    {
+      "label": "Chocolatemain",
+      "item_id": 9,
+      "name_as_declared": "Fractionated Fat",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "A processed fat, not an additive."
+    },
+    {
+      "label": "Chocolateraw",
+      "item_id": 10,
+      "name_as_declared": "Fractionated Fat",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "A processed fat, not an additive."
+    },
+    {
+      "label": "EU_productmain",
+      "item_id": 1,
+      "name_as_declared": "MODIFIED CORNSTARCH",
+      "declared_code": null,
+      "review_reason": "ambiguous -- 17 candidate(s): 1400, 1401, 1402, 1403, 1404, 1405, 1410, 1412, 1413, 1414, 1420, 1422, 1440, 1442, 1450, 1451, 1452",
+      "answer": {
+        "outcome": "correctly_declined",
+        "canonical_ins": null,
+        "classification": null
+      },
+      "notes": "17 modified starches exist (1400-1452). The label does not say which. Declining is correct; guessing would be wrong."
+    },
+    {
+      "label": "EU_productmain",
+      "item_id": 9,
+      "name_as_declared": "MODIFIED CORNSTARCH",
+      "declared_code": null,
+      "review_reason": "ambiguous -- 17 candidate(s): 1400, 1401, 1402, 1403, 1404, 1405, 1410, 1412, 1413, 1414, 1420, 1422, 1440, 1442, 1450, 1451, 1452",
+      "answer": {
+        "outcome": "correctly_declined",
+        "canonical_ins": null,
+        "classification": null
+      },
+      "notes": "17 modified starches exist (1400-1452). The label does not say which. Declining is correct; guessing would be wrong."
+    },
+    {
+      "label": "EU_productmain",
+      "item_id": 16,
+      "name_as_declared": "CALCIUM PHOSPHATE",
+      "declared_code": null,
+      "review_reason": "ambiguous -- 3 candidate(s): 341(i), 341(ii), 341(iii)",
+      "answer": {
+        "outcome": "correctly_declined",
+        "canonical_ins": null,
+        "classification": null
+      },
+      "notes": "341(i), 341(ii) and 341(iii) are separate entries. The label does not distinguish them."
+    },
+    {
+      "label": "Ice-creammain",
+      "item_id": 1,
+      "name_as_declared": "Milk and Milk Solids",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Dairy ingredient."
+    },
+    {
+      "label": "Ice-creammain",
+      "item_id": 11,
+      "name_as_declared": "Stevia",
+      "declared_code": null,
+      "review_reason": "ambiguous -- 4 candidate(s): 960a, 960b, 960c, 960d",
+      "answer": {
+        "outcome": "correctly_declined",
+        "canonical_ins": null,
+        "classification": null
+      },
+      "notes": "The additive is steviol glycosides, 960a-d depending on production method. 'Stevia' alone is the plant and does not determine which."
+    },
+    {
+      "label": "Ice-creammain",
+      "item_id": 20,
+      "name_as_declared": "Hazelnut Pieces",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Nut, whole food."
+    },
+    {
+      "label": "Ice-creammain",
+      "item_id": 21,
+      "name_as_declared": "Hazelnut Paste",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Ground nut, whole food."
+    },
+    {
+      "label": "Mixed",
+      "item_id": 1,
+      "name_as_declared": "INS 924",
+      "declared_code": "INS 924",
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": "924",
+        "classification": "additive"
+      },
+      "notes": "Potassium bromate, a flour treatment agent. Absent from codex_ins and from eu_fip. Identifiable via search; the agent declined only because search_web hit quota exhaustion, so this scores as wrongly-declined — an infrastructure failure, not a reasoning failure."
+    },
+    {
+      "label": "Noodlesraw",
+      "item_id": 14,
+      "name_as_declared": "Red chilli powder",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Spice."
+    },
+    {
+      "label": "Noodlesraw",
+      "item_id": 18,
+      "name_as_declared": "Aniseed powder",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Spice."
+    },
+    {
+      "label": "Noodlesraw",
+      "item_id": 20,
+      "name_as_declared": "Fenugreek powder",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Spice."
+    },
+    {
+      "label": "Noodlesraw",
+      "item_id": 21,
+      "name_as_declared": "Black pepper powder",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Spice."
+    },
+    {
+      "label": "Noodlesraw",
+      "item_id": 22,
+      "name_as_declared": "Toasted onion powder",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Vegetable powder."
+    },
+    {
+      "label": "Noodlesraw",
+      "item_id": 23,
+      "name_as_declared": "Clove powder",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Spice."
+    },
+    {
+      "label": "Noodlesraw",
+      "item_id": 24,
+      "name_as_declared": "Green cardamom powder",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Spice."
+    },
+    {
+      "label": "Noodlesraw",
+      "item_id": 25,
+      "name_as_declared": "Nutmeg powder",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Spice."
+    },
+    {
+      "label": "Noodlesraw",
+      "item_id": 26,
+      "name_as_declared": "Hydrolysed groundnut protein",
+      "declared_code": null,
+      "review_reason": "unresolved -- no candidate identity found at all",
+      "answer": {
+        "outcome": "identified",
+        "canonical_ins": null,
+        "classification": "food_ingredient"
+      },
+      "notes": "Protein hydrolysate used as an ingredient, not an Annex II additive."
+    }
+  ]
+}

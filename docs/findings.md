@@ -205,3 +205,25 @@ unconfirmed category.
 n=17 with AI-drafted, unverified ground truth. Differences under ~0.10 are one
 or two label-components. These are directional findings suitable for comparing
 configurations against each other, not validated accuracy claims.
+
+## F-16 — Agentic review-queue resolver: 0 wrong proposals
+22 review-queue items across the test set, hand-labelled ground truth.
+LangGraph tool-calling loop (agent ↔ tools, step cap 5), six tools wrapping
+existing reference-data functions plus search. Model: gemini-3.5-flash-lite.
+
+    correct              15
+    wrong                 0
+    correctly declined    4
+    wrongly declined      3
+
+All four genuinely ambiguous items (modified cornstarch ×2, calcium
+phosphate, Stevia) were declined rather than guessed — the label does not
+determine which of 17 / 3 / 4 candidates is meant.
+
+The three wrongly-declined are infrastructure, not reasoning: one from
+search_web quota exhaustion, two from hitting the 5-step cap.
+
+Wrong and declined are reported separately and never combined into a single
+accuracy figure. A wrong proposal is dangerous because the human reviewer may
+accept it; a decline only leaves work undone. Proposals are advisory — a
+human confirms before any resolution is applied.

@@ -1,6 +1,317 @@
 # Build log
 
-## 2026-08-02 — app.py driven by the LangGraph pipeline, with a legacy fallback
+## 2026-08-03 — Rate-limit handling for the agent loop
+
+### Why
+
+MEASURED: `scripts/agent_review.py --all` crashed with a 429 --
+`GenerateRequestsPerMinutePerProjectPerModel-FreeTier`, quotaValue 15, on
+`gemini-3.5-flash-lite` (the concrete model `gemini-flash-lite-latest`
+resolves to). A per-minute limit, not the exhausted daily one -- each
+review item makes several model round trips (tool calls, then a final
+answer), so 22 items back-to-back exceeds 15 requests/minute easily. Our
+own fixed exponential backoff (starting at 2s) could undershoot the
+server's actual ask by a wide margin.
+
+### What changed
+
+- **`_retry_delay_seconds`** (new, duplicated in both
+  `src/extractors/gemini.py` and `src/agent/resolver_agent.py` -- same
+  stage-independence convention every other small retry/parsing helper in
+  this project already follows). Parses the server's own
+  `RetryInfo.retryDelay` out of a 429's error details and sleeps that
+  duration plus a 1s margin; falls back to the existing exponential
+  backoff only when the detail is absent (a plain 500/503 usually carries
+  no `RetryInfo` at all). Confirmed the exact error shape LIVE before
+  writing this -- deliberately spammed real requests against
+  `SECONDARY_MODEL` until hitting the real 429, not guessed from
+  documentation: `exc.details` is
+  `{"error": {..., "details": [..., {"@type":
+  ".../google.rpc.RetryInfo", "retryDelay": "49s"}]}}`. Applied to both
+  places that retry model calls: `GeminiExtractor._call_model` (every
+  extraction/gate call in the project) and `GeminiLLM._call` (the agent's
+  own tool-calling loop) -- `search_web`'s own isolated grounded call
+  (`src/agent/tools.py`) is deliberately left as-is: it already degrades
+  to `available=False` immediately on any failure by design, and retrying
+  there would work against the "keep the agent loop moving" intent (see
+  the previous entry). `src/report/narrator.py`/`src/category/embedder.py`
+  share the same fixed-backoff gap and were NOT touched -- out of this
+  task's explicit scope, flagged here as a candidate for a follow-up.
+- **`scripts/agent_review.py`** -- `--delay SECONDS` (default 5) paces the
+  loop between review items so a long `--all` run stays under the
+  per-minute ceiling BY CONSTRUCTION, not by recovering from a crash.
+  Prints an estimated total runtime before a `--all` run starts (item
+  count x (`--delay` + an empirical ~15s/item processing estimate),
+  labelled as an estimate, not a guarantee). `--force` reprocesses items
+  that already have a proposal; without it, `_scan_target` checks
+  `data/outputs/agent/<name>.json` FIRST and skips any item already
+  present there -- RESUME, not restart. Output is now written
+  INCREMENTALLY after every single item (`_write_agent_output`), not
+  batched at the end of a file's loop, so a crash partway through a
+  9-item file only loses the one item in flight, not the whole file.
+  `resolved_model_id` (the CONCRETE model version the server actually
+  used, e.g. `"gemini-3.5-flash-lite"`, read off
+  `response.model_version`) is recorded in the output JSON alongside the
+  requested `model_id` (the alias, e.g. `"gemini-flash-lite-latest"`) --
+  `GeminiLLM.resolved_model_id` is set after every successful call and
+  read by the CLI after `resolve_review_item()` returns.
+
+### Tests added
+
+- `tests/test_gemini_extractor_retry.py` (4) -- `_retry_delay_seconds`
+  parses the real captured error shape and returns `None` when
+  `RetryInfo` is absent; a 429 with `retryDelay` sleeps exactly that
+  duration + margin (mocked `time.sleep`, mocked client, no network); a
+  429/500 without `retryDelay` falls back to `INITIAL_BACKOFF_SECONDS`.
+- `tests/test_agent.py` (+2) -- the same two behaviours for `GeminiLLM`,
+  plus confirms `resolved_model_id` is captured from the mocked
+  response's `model_version`.
+- `tests/test_agent_review_cli.py` (4, new file) -- `_scan_target` against
+  `tmp_path` fixtures (settings monkeypatched, same pattern
+  `tests/test_email.py` already uses): an item already present in the
+  output file is skipped and its existing proposal carried forward;
+  `force=True` reprocesses everything and discards prior proposals; no
+  existing output means everything is pending; every item already done
+  means nothing is pending.
+
+**Total: 262 tests passing** (252 before this task + 10 new). `ruff check
+.` unchanged: 27 pre-existing errors, all in `src/codex/run_codex.py`,
+unrelated to this task.
+
+### Verified, not just written
+
+- Deliberately spammed `SECONDARY_MODEL` with rapid requests to trigger a
+  REAL 429 before writing any code, to see the exact error shape rather
+  than assume it -- confirmed `quotaValue: "15"`,
+  `quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"`, and a
+  `RetryInfo.retryDelay` field, matching the task's own measured report
+  exactly.
+- Confirmed `response.model_version` is the resolved concrete model
+  (requesting the alias `"gemini-flash-lite-latest"` returned
+  `"gemini-3.5-flash-lite"`) against the live API before wiring it in.
+- **Ran `scripts/agent_review.py --all --delay 3` for real, start to
+  finish**, against the actual 18 still-pending review items across 5
+  files (4 already done from the prior entry's testing were correctly
+  skipped first). The printed estimate
+  ("18 review item(s)... ROUGHLY ~324s (~5.4 min)") was accurate. The run
+  completed with ZERO crashes despite `search_web` hitting real quota
+  exhaustion repeatedly throughout (handled exactly as designed --
+  `available: false`, the agent kept going or declined cleanly every
+  time) -- a genuine `GraphTestChips` and a genuine `Noodlesraw` item both
+  hit the step cap for real during this run, not simulated. Every touched
+  file's `resolved_model_id` was written correctly.
+- **Re-ran `scripts/agent_review.py --all` immediately after** -- printed
+  "Nothing to do -- every review item already has a proposal", confirming
+  full resume/skip correctness against real output files, not just the
+  unit tests.
+- `uv run pytest` -- 262 passed. `uv run ruff check .` -- unchanged
+  pre-existing count.
+
+### Anything unexpected
+
+- None of the task's four numbered requirements needed any trade-off or
+  reinterpretation -- the measured error report matched the live-captured
+  shape exactly, and the existing `_scan_target`/incremental-write design
+  (needed anyway for correctness) turned out to make the ETA estimate MORE
+  accurate for free, since it naturally excludes already-done items rather
+  than counting the full queue.
+
+## 2026-08-02 — Agentic review-queue resolver (src/agent/)
+
+### Why
+
+The pipeline ends with items a human must resolve -- 22 of them across the
+real test set (scanned directly from data/outputs/verdict/*.json's
+headline=="unresolved" items, excluding one scratch/test label; see "What
+changed" below), and each needs a genuinely DIFFERENT approach: 17
+candidate modified starches need narrowing, Stevia needs narrowing among 4
+production methods, INS 924 is absent from codex_ins.json entirely and
+needs an external lookup, "Hazelnut Pieces" needs a food-vs-additive
+judgement, eight spice-powder items need a lexicon judgement the exact
+label wording didn't already match. A fixed pipeline runs the same steps
+on every item regardless. This is the one place in the system where TOOL
+SELECTION varies per item -- the model choosing which of six tools fits
+THIS item, and how many times, is what makes it an agent rather than
+another chain, per the task's own framing.
+
+### Safety
+
+Same discipline as category confirmation: the agent PROPOSES, a human
+CONFIRMS. `resolve_review_item()` never writes to a verdict, never changes
+`eu_canonical_id` on a `ResolvedItem`, and never removes an item from the
+review queue by itself -- verified directly (see Tests). `app.py`'s
+Accept/Reject buttons are the only things that ever apply a proposal, and
+Accept touches exactly the ONE item's resolution, never any other.
+
+### What changed
+
+- **`src/agent/tools.py`** -- six tools, each wrapping an existing
+  reference dataset this project already loads elsewhere (`codex_ins.json`,
+  `eu_fip.json`, `label_aliases.json`) or the caller's own already-computed
+  context; none reimplements resolution logic `src/resolve/resolver.py`
+  already owns. `lookup_codex`, `lookup_eu_fip`, `check_food_lexicon`,
+  `list_family_members`, `get_product_context`, `search_web`. Every tool
+  returns plain data with a `source` field.
+  `list_family_members` takes a LIST of candidate codes, not a bare parent
+  code to prefix-scan from, per its own docstring: several of this
+  project's real ambiguous families (the 17 modified-starch candidates)
+  share no numeric prefix at all, only a curated `label_aliases.json`
+  `ambiguous[]` entry -- prefix derivation would miss them; the item's own
+  `candidates` list is what actually works for every real case.
+  `search_web` uses Gemini's own built-in Google Search grounding
+  (`google.genai` `types.Tool(google_search=...)`) rather than adding a new
+  search-provider dependency this project has no existing integration for
+  -- the same client/API key every other stage already calls. Verified
+  live that it degrades to `{"available": False, ...}` on quota exhaustion
+  rather than raising (see Verified) -- this happened for real, unprompted,
+  during testing.
+- **`src/agent/resolver_agent.py`** -- `resolve_review_item(item, refs,
+  llm, tools) -> AgentProposal`, a small LangGraph `StateGraph` (agent node
+  <-> tools node, step-capped at `MAX_STEPS = 5`). `AgentProposal` carries
+  `declined: bool` as a first-class outcome, not an error path --
+  DECLINING IS A SUCCESS when the label genuinely doesn't determine an
+  answer, and the prompt says so explicitly. A proposal with an empty
+  `evidence` list, or one where no tool was ever called at all, is forced
+  to `declined=True` regardless of what the model itself claimed
+  (`_parse_proposal`). No LangChain: the `LLM` protocol
+  (`start`/`send_tool_results` -> `LLMTurn`) and `GeminiLLM` talk to
+  `google.genai`'s native function calling directly, the same pattern
+  `src/extractors/gemini.py`/`src/report/narrator.py` already use for
+  retry/backoff, duplicated rather than imported for the same
+  stage-independence reason those two already duplicate it from each
+  other.
+- **`scripts/agent_review.py`** -- CLI: one verdict file or `--all`.
+  Prints name/proposal/confidence/reasoning/tool-trace per item, writes
+  `data/outputs/agent/<name>.json`. `--model` defaults to
+  `SECONDARY_MODEL`, not `PRIMARY_MODEL` (quota-exhausted). Added
+  `AGENT_OUTPUT_DIR`/`AGENT_TRUTH_PATH` to `config.py`.
+- **`app.py`** review-queue section: the queue is now split by headline --
+  `"unresolved"` items (identity resolution) get a NEW
+  `render_agent_review_queue` with "Ask the assistant" per item and for
+  the whole queue, showing the proposal's reasoning/evidence/tool-trace
+  plus Accept/Reject; `"category_unknown"` items are untouched, still
+  rendered by the existing `components.render_review_queue` (a food
+  category confirmation is a different flow entirely). Accepting a
+  proposal WITH a proposed INS code re-runs the SAME `resolve_items`
+  cascade with `declared_code` overridden to that code -- so
+  `eu_canonical_id`/functional classes are derived by the real cascade,
+  never hand-computed in `app.py`. Accepting a proposal with no code
+  (e.g. `food_ingredient`) sets the classification directly. Either way
+  `_recompute_verdict_after_resolution_change` re-runs `evaluate()` +
+  substitutes + horizon (all free, no API call) for the WHOLE verdict, but
+  deliberately does NOT re-run narration, which costs a real model call --
+  the deterministic `verdict.summary` shown above it is refreshed, which
+  is the part that matters. The agent is NOT in the main graph/pipeline
+  path -- every entry point is on-demand, after a verdict already exists.
+- **`data/golden/agent_truth.json`** -- generated (not hand-written) from
+  the real 22-item scan described above: label, item_id, name_as_declared,
+  declared_code, review_reason, and a blank `answer: {outcome,
+  canonical_ins, classification}` for the user to fill in by hand.
+  `GraphTestChips` (byte-identical extraction to `Chipsmain` -- scratch
+  data from the earlier LangGraph task, not a curated label) is excluded
+  and the exclusion is recorded in `_meta`.
+- **`scripts/score_agent.py`** -- reports `correct` / `wrong` /
+  `correctly_declined` / `wrongly_declined`, always separately, never
+  combined into one accuracy number (a wrong proposal is worse than a
+  decline, since a human may accept it without checking). Skips items
+  whose `answer.outcome` is still null (not yet reviewed) rather than
+  scoring them as misses. Appends one row to `data/outputs/experiments.csv`
+  with `stage="agent"` -- the file already had
+  `scripts/score_category.py`'s own header; `_ensure_agent_columns`
+  migrates it in place (every existing row rewritten with the four new
+  columns blank) rather than starting a second, incompatible file, the
+  first time it's missing them.
+
+### Tests added
+
+- `tests/test_agent.py` (6, all required by the task) -- both the LLM and
+  every tool are mocked (`MockLLM` scripts a fixed turn sequence;
+  `ToolSpec.fn` is a `Mock()`), no API calls anywhere in the file: the
+  agent calls `list_family_members` for an ambiguous item (asserted via
+  `Mock.assert_called_once_with`); calls `check_food_lexicon` for an
+  unresolved plain-food item; a proposal with empty `evidence` is rejected
+  and forced to `declined=True` regardless of what the model claimed; the
+  step cap halts a loop that keeps requesting tools at exactly
+  `MAX_STEPS` model calls, never more; the agent never mutates the input
+  `item` dict (asserted via a `copy.deepcopy` snapshot); a declined
+  proposal is returned normally, not raised.
+
+**Total: 252 tests passing** (246 before this task + 6 new). `ruff check .`
+unchanged: 27 pre-existing errors, all in `src/codex/run_codex.py`,
+unrelated to this task.
+
+### Verified, not just written
+
+- Checked the INSTALLED `google-genai` (2.16.0) function-calling shape
+  live against the real API BEFORE writing `resolver_agent.py`: confirmed
+  `response.function_calls`, `types.Part.from_function_response`, and that
+  Gemini 2.5 REJECTS a hand-reconstructed function-call turn missing its
+  `thought_signature` (400 INVALID_ARGUMENT, reproduced directly) -- this
+  is why `GeminiLLM` preserves the SDK's own `response.candidates[0].content`
+  object across turns rather than re-serializing a plain-dict message
+  history, and why the `LLM` protocol is `start()`/`send_tool_results()`
+  (conversation state owned by the adapter) rather than a stateless
+  `messages` list threaded through LangGraph state.
+- Ran `resolve_review_item` against the REAL `SECONDARY_MODEL` (no mocks)
+  for two real review-queue items: **INS 924** (Mixed) -- the agent tried
+  `lookup_codex`, `lookup_eu_fip`, `search_web` (which returned
+  `available=false, "quota exhausted"` -- a REAL quota hit during testing,
+  handled exactly as designed, not simulated), then `check_food_lexicon`,
+  and correctly DECLINED with real evidence. **Hazelnut Pieces**
+  (Ice-creammain) -- the agent called `check_food_lexicon` on the full
+  declared name, got a weak match, retried on its own initiative with just
+  `"hazelnut"`, got an exact hit, and correctly proposed
+  `food_ingredient`/high confidence.
+- Ran `scripts/agent_review.py data/outputs/verdict/Mixed.json` end to end
+  for real -- output matched the direct-call test above, written to
+  `data/outputs/agent/Mixed.json`.
+- `app.py`'s new UI logic verified via `AppTest` against REAL
+  Ice-creammain extraction/resolution/category/verdict data (no full
+  pipeline re-run needed -- loaded straight from
+  `data/outputs/*/Ice-creammain.json`), with `resolve_review_item` mocked
+  at its SOURCE module (`src.agent.resolver_agent.resolve_review_item`,
+  not `app.resolve_review_item` -- the latter silently does nothing, since
+  Streamlit re-executes app.py's imports fresh on every rerun, a mistake
+  caught by cross-checking the mock's canned answer against what the REAL
+  model would say for the same item before trusting the first pass).
+  Confirmed: accepting a proposal WITHOUT a code (Hazelnut Pieces ->
+  `food_ingredient`) moves that item's headline from `unresolved` to
+  `out_of_scope`, updates ONLY that item's resolution (every other item's
+  resolution dict compared byte-for-byte, unchanged), and records the
+  decision. Accepting a proposal WITH a code (Stevia -> `960a`) re-derives
+  `eu_canonical_id="960a"` matching a direct `resolve_items` call with that
+  code, and produces headline `permitted_with_conditions`. Reject leaves
+  the resolution completely unchanged (compared byte-for-byte) and records
+  only the decision.
+- `scripts/score_agent.py` run against the real (still-blank)
+  `agent_truth.json`: correctly reports all 22 items as "not yet
+  reviewed", scores nothing, and still appends a zero-count row --
+  migrating `experiments.csv`'s header in place (existing `category`/
+  `corpus_diagnostic` rows preserved, padded blank for the four new
+  columns).
+- `uv run pytest` -- 252 passed. `uv run ruff check .` -- unchanged
+  pre-existing count.
+
+### Anything unexpected
+
+- **The empty-evidence rule caught a real near-miss during testing.**
+  Early in manual testing, `patch("app.resolve_review_item", ...)` (the
+  wrong mock target -- see above) let the REAL model run unmocked in what
+  was meant to be an offline check; it happened to answer
+  `food_ingredient` for Hazelnut Pieces either way, which is why the
+  mistake wasn't obvious from the assertion result alone and needed a
+  second look at *why* the test ran suspiciously fast for a live network
+  call.
+- **`search_web` hit real quota exhaustion unprompted during testing**,
+  which turned out to be a genuine, useful test of the "must degrade, not
+  raise" requirement rather than something that needed to be simulated.
+- Did not run `scripts/agent_review.py --all` across the full 22-item test
+  set for real (only the single-file `Mixed.json` run, plus two direct
+  `resolve_review_item` calls) -- 22 items at up to 5 model calls each was
+  judged not worth the time/quota cost given the mechanism was already
+  validated end to end three separate ways (direct calls, the CLI, and the
+  UI). `data/outputs/agent/` will fill in properly the first time someone
+  runs `--all` for real.
 
 ### Why
 

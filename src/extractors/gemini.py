@@ -17,6 +17,9 @@ from src.schemas import ExtractionResult, GateResult
 MAX_VALIDATION_RETRIES = 2
 MAX_RATE_LIMIT_RETRIES = 5
 INITIAL_BACKOFF_SECONDS = 2.0
+# Added to the server's own RetryInfo.retryDelay before sleeping -- a small
+# safety margin, not a guess at the delay itself (see _retry_delay_seconds).
+RETRY_DELAY_MARGIN_SECONDS = 1.0
 # 429 = rate limited, 500/503 = transient server-side overload — all worth
 # backing off and retrying rather than failing the whole run immediately.
 RETRYABLE_STATUS_CODES = {429, 500, 503}
@@ -24,6 +27,39 @@ RETRYABLE_STATUS_CODES = {429, 500, 503}
 
 class EmptyResponseError(RuntimeError):
     """Raised when the model returns no text — blocked or truncated, not a crash."""
+
+
+def _retry_delay_seconds(exc: errors.APIError) -> float | None:
+    """The server's own explicit wait time from a 429's RetryInfo detail
+    (e.g. "Please retry in 49.445998484s." -> 49.445998484), if present.
+
+    MEASURED: scripts/agent_review.py --all hit
+    GenerateRequestsPerMinutePerProjectPerModel-FreeTier (quotaValue 15) on
+    gemini-3.5-flash-lite -- a per-minute limit our own fixed exponential
+    backoff (starting at INITIAL_BACKOFF_SECONDS=2s) can undershoot by a
+    wide margin; the server was asking for 19-49s. Confirmed directly
+    against a live 429 before writing this: exc.details is the raw error
+    body, `{"error": {..., "details": [..., {"@type":
+    ".../google.rpc.RetryInfo", "retryDelay": "49s"}]}}` -- a list of typed
+    detail objects, not always present (only quota errors carry RetryInfo;
+    a transient 500/503 usually doesn't), which is why the caller falls
+    back to exponential backoff when this returns None.
+    """
+    details = getattr(exc, "details", None)
+    if not isinstance(details, dict):
+        return None
+    error = details.get("error", details)
+    for detail in error.get("details") or []:
+        if not isinstance(detail, dict):
+            continue
+        if str(detail.get("@type", "")).endswith("RetryInfo"):
+            raw = detail.get("retryDelay")
+            if isinstance(raw, str) and raw.endswith("s"):
+                try:
+                    return float(raw[:-1])
+                except ValueError:
+                    return None
+    return None
 
 
 def _strip_markdown_fences(text: str | None) -> str:
@@ -127,8 +163,12 @@ class GeminiExtractor:
                 return response.text
             except errors.APIError as exc:
                 if exc.code in RETRYABLE_STATUS_CODES and attempt < MAX_RATE_LIMIT_RETRIES - 1:
-                    time.sleep(delay)
-                    delay *= 2
+                    retry_delay = _retry_delay_seconds(exc)
+                    if retry_delay is not None:
+                        time.sleep(retry_delay + RETRY_DELAY_MARGIN_SECONDS)
+                    else:
+                        time.sleep(delay)
+                        delay *= 2
                     continue
                 raise
         raise RuntimeError("unreachable")

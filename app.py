@@ -40,6 +40,8 @@ import streamlit as st
 from langgraph.types import Command
 
 from config import settings
+from src.agent.resolver_agent import AgentProposal, make_gemini_llm, resolve_review_item
+from src.agent.tools import AgentRefs, build_tools
 from src.category.classifier import build_queries, classify, item_component_labels
 from src.category.corpus import build_corpus
 from src.category.embedder import GeminiEmbedder
@@ -77,7 +79,6 @@ from src.ui.styles import CUSTOM_CSS
 # here would silently discard what the user typed.
 _CATEGORY_CONFIG = CONFIGS["best"]
 
-_REVIEW_HEADLINES = {"unresolved", "category_unknown"}
 _PERMITTING_HEADLINES = {"permitted_qs", "permitted_with_limit", "permitted_with_conditions"}
 
 
@@ -573,6 +574,8 @@ def _reset_session() -> None:
         "graph_name",
         "graph_description",
         "graph_broken",
+        "agent_proposals",
+        "agent_decisions",
     ):
         st.session_state.pop(key, None)
     st.session_state.stage = "input"
@@ -968,6 +971,275 @@ def _build_identity(verdict: ProductVerdict) -> ReportIdentity:
     )
 
 
+# =========================================================================== #
+# agent-assisted review queue -- ON DEMAND ONLY, never in the main pipeline.
+# The agent (src/agent/) PROPOSES; nothing here applies a proposal without
+# an explicit Accept click. Reject just records the rejection -- the item
+# stays in the review queue exactly as before. Same discipline as category
+# confirmation: a probabilistic proposal is acceptable only behind human
+# confirmation (see docs/build_log.md).
+# =========================================================================== #
+def _build_agent_review_item(item_id: int) -> dict | None:
+    """The plain dict src.agent.resolver_agent.resolve_review_item expects,
+    joined from the SAME session_state extraction/resolution this screen
+    already holds -- no file re-read, matching scripts/agent_review.py's
+    own _build_review_items but sourced from session_state instead of
+    files."""
+    resolved_by_id = {r.item_id: r for r in st.session_state.resolution.items}
+    resolved = resolved_by_id.get(item_id)
+    if resolved is None:
+        return None
+    extraction_items = st.session_state.extraction["extraction"]["items"]
+    extracted = next((e for e in extraction_items if e["item_id"] == item_id), {})
+    return {
+        "item_id": item_id,
+        "name_as_declared": extracted.get("name_as_declared"),
+        "verbatim": extracted.get("verbatim"),
+        "declared_code": extracted.get("declared_code"),
+        "classification": resolved.classification,
+        "candidates": resolved.candidates,
+        "flags": resolved.flags,
+        "component_label": None,
+    }
+
+
+def _build_agent_refs(review_item: dict) -> AgentRefs:
+    refs = _load_references()
+    gate = st.session_state.extraction["gate"]
+    extraction_items = st.session_state.extraction["extraction"]["items"]
+    other_names = [
+        name
+        for e in extraction_items
+        if e["item_id"] != review_item["item_id"] and (name := (e.get("name_as_declared") or e.get("verbatim")))
+    ]
+    verdict: ProductVerdict = st.session_state.verdict
+    component = review_item.get("component_label") or "(product)"
+    confirmed_category = verdict.category_used.get(component) if verdict else None
+    return AgentRefs(
+        codex_ins=_load_json(settings.REFERENCE_DIR / "codex_ins.json", []),
+        eu_fip=refs.eu_fip,
+        label_aliases=_load_json(settings.REFERENCE_DIR / "label_aliases.json", {}),
+        product_name=gate.get("product_name"),
+        product_descriptor=gate.get("product_descriptor"),
+        confirmed_category=confirmed_category,
+        other_ingredient_names=other_names,
+        model_id=settings.SECONDARY_MODEL,
+    )
+
+
+def _ask_agent_about_item(item_id: int) -> None:
+    st.session_state.setdefault("agent_proposals", {})
+    review_item = _build_agent_review_item(item_id)
+    if review_item is None:
+        return
+    try:
+        refs = _build_agent_refs(review_item)
+        tools = build_tools(refs)
+        llm = make_gemini_llm(settings.SECONDARY_MODEL, tools)
+        proposal = resolve_review_item(review_item, refs, llm, tools)
+    except Exception as exc:  # noqa: BLE001 -- the assistant is optional; a failure must not break the results screen
+        st.session_state.agent_proposals[item_id] = None
+        st.warning(f"The assistant could not investigate this item: {exc}")
+        return
+    st.session_state.agent_proposals[item_id] = proposal
+
+
+def _recompute_verdict_after_resolution_change() -> None:
+    """The SAME computation _finalise runs, replayed after one item's
+    resolution changed -- evaluate() again with the SAME confirmed
+    categories the current verdict already carries (read back off
+    verdict.items' own by_category/flags, not re-asked of the user), plus
+    substitutes/horizon. Narration is deliberately NOT re-generated here --
+    unlike evaluate()/find_substitutes()/find_horizon_signals(), it costs a
+    real model call, and the deterministic verdict.summary shown above it
+    is already refreshed; see docs/build_log.md."""
+    refs = _load_references()
+    resolved_items = st.session_state.resolution.items
+    resolved_by_id = {r.item_id: r for r in resolved_items}
+    item_labels = item_component_labels(st.session_state.extraction["extraction"]["items"], resolved_by_id)
+
+    old_verdict: ProductVerdict = st.session_state.verdict
+    choices: dict[str | None, CategoryCandidate] = {}
+    for item in old_verdict.items:
+        if item.by_category and "category_confirmed_by_user" in item.flags:
+            cv = item.by_category[0]
+            choices[item.component_label] = CategoryCandidate(
+                code=cv.fcs_code, name=cv.category_name or cv.fcs_code, similarity=1.0, permitted=True
+            )
+
+    item_category_map, confirmed_item_ids = _apply_category_confirmations(
+        st.session_state.category_results, choices, resolved_items, item_labels
+    )
+    verdict = evaluate(resolved_items, item_category_map, refs.eu_fip, confirmed_item_ids)
+
+    canonical_ins_by_item = {r.item_id: r.canonical_ins for r in resolved_items if r.canonical_ins}
+    codex_names = {row["ins"]: row["name"] for row in refs.codex_ins}
+    extraction_names = _extraction_names(st.session_state.extraction)
+    verdict = _enrich_additive_names(verdict, extraction_names, canonical_ins_by_item, codex_names)
+
+    preview_item_category_map, _unused = _apply_category_confirmations(
+        st.session_state.category_results, {}, resolved_items, item_labels
+    )
+    preview_verdict = evaluate(resolved_items, preview_item_category_map, refs.eu_fip, frozenset())
+
+    additive_ids = sorted({i.eu_canonical_id for i in verdict.items if i.eu_canonical_id})
+    additive_names = {
+        i.eu_canonical_id: i.additive_name for i in verdict.items if i.eu_canonical_id and i.additive_name
+    }
+    horizon_result = find_horizon_signals(
+        additive_ids, refs.horizon_signals, additive_names=additive_names, data_retrieved=refs.horizon_meta.get("retrieved")
+    )
+    horizon_flagged = frozenset(s.eu_canonical_id for s in horizon_result.signals)
+    substitute_result = find_substitutes(verdict, refs.eu_fip, refs.codex_ins, canonical_ins_by_item, horizon_flagged)
+
+    st.session_state.verdict = verdict
+    st.session_state.preview_verdict = preview_verdict
+    st.session_state.horizon_result = horizon_result
+    st.session_state.substitute_result = substitute_result
+    st.session_state.run_timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _accept_agent_proposal(item_id: int, proposal: AgentProposal) -> None:
+    """Sets the resolution for THIS ITEM ONLY, then recomputes the verdict
+    -- never touches any other item, never writes a verdict directly (the
+    recompute goes through the same evaluate() call every other path in
+    this app uses)."""
+    refs = _load_references()
+    resolution: ResolutionResult = st.session_state.resolution
+    original = next(r for r in resolution.items if r.item_id == item_id)
+
+    if proposal.proposed_canonical_ins:
+        # Re-run the SAME resolve cascade (resolve_items) with declared_code
+        # overridden to the agent's proposed code, so eu_canonical_id/
+        # functional_classes/etc. are derived by the real cascade -- never
+        # hand-computed here. This is a code_exact match by construction
+        # (the proposed code is a real INS number), so it resolves exactly
+        # as if the label had printed that code itself.
+        extraction_items = st.session_state.extraction["extraction"]["items"]
+        target = next(e for e in extraction_items if e["item_id"] == item_id)
+        overridden = {**target, "declared_code": proposal.proposed_canonical_ins}
+        re_resolved = resolve_items([overridden], refs.resolver_refs).items[0]
+        updated = re_resolved.model_copy(update={"flags": [*re_resolved.flags, "agent_accepted"]})
+    else:
+        confidence_to_score = {"high": 0.9, "medium": 0.7, "low": 0.5}
+        updated = original.model_copy(
+            update={
+                "canonical_ins": None,
+                "eu_canonical_id": None,
+                "classification": proposal.proposed_classification,
+                "resolution_method": "agent_accepted",
+                "resolution_confidence": confidence_to_score.get(proposal.confidence, 0.5),
+                "flags": [*original.flags, "agent_accepted"],
+                "candidates": [],
+            }
+        )
+
+    new_items = [updated if r.item_id == item_id else r for r in resolution.items]
+    st.session_state.resolution = resolution.model_copy(update={"items": new_items})
+
+    _recompute_verdict_after_resolution_change()
+    st.session_state.setdefault("agent_decisions", {})
+    st.session_state.agent_decisions[item_id] = "accepted"
+
+
+def _reject_agent_proposal(item_id: int) -> None:
+    """Records the rejection only -- the item's resolution is untouched and
+    it stays in the review queue exactly as before."""
+    st.session_state.setdefault("agent_decisions", {})
+    st.session_state.agent_decisions[item_id] = "rejected"
+
+
+def _render_agent_proposal(item_id: int, proposal: AgentProposal) -> None:
+    if proposal.declined:
+        st.info(f"Assistant declined: {proposal.decline_reason}")
+    else:
+        code = f" (INS {proposal.proposed_canonical_ins})" if proposal.proposed_canonical_ins else ""
+        st.markdown(f"**Assistant proposes:** {proposal.proposed_classification}{code} — confidence: {proposal.confidence}")
+    st.caption(proposal.reasoning)
+    if proposal.evidence:
+        with st.expander(f"Evidence ({len(proposal.evidence)})"):
+            for line in proposal.evidence:
+                st.markdown(f"- {line}")
+    if proposal.tool_calls:
+        with st.expander(f"Tool calls ({len(proposal.tool_calls)})"):
+            for call in proposal.tool_calls:
+                st.caption(f"**{call.get('tool')}**({json.dumps(call.get('args', {}))}) → {call.get('result_summary')}")
+
+    if not proposal.declined:
+        col_accept, col_reject = st.columns(2)
+        with col_accept:
+            if st.button("Accept", key=f"agent_accept_{item_id}", type="primary"):
+                _accept_agent_proposal(item_id, proposal)
+                st.rerun()
+        with col_reject:
+            if st.button("Reject", key=f"agent_reject_{item_id}"):
+                _reject_agent_proposal(item_id)
+                st.rerun()
+    elif st.button("Dismiss", key=f"agent_dismiss_{item_id}"):
+        _reject_agent_proposal(item_id)
+        st.rerun()
+
+
+def render_agent_review_queue(items: list[dict], names: dict[int, str] | None = None) -> None:
+    """The "unresolved" slice of the review queue (identity resolution) --
+    "category_unknown" items still go through components.render_review_queue
+    unchanged, since those need a food-category confirmation, not an
+    identity proposal. Same section title/note styling as the plain queue,
+    with an "Ask the assistant" control (per item, and for the whole queue)
+    added below each entry."""
+    if not items:
+        return
+    st.session_state.setdefault("agent_proposals", {})
+    st.session_state.setdefault("agent_decisions", {})
+
+    st.markdown(f"<div class='eu-section-title'>Review queue ({len(items)})</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<p class='eu-section-note'>These items need a human decision -- the substance could not be "
+        "identified. An assistant can investigate using the same reference data this app already "
+        "uses and PROPOSE an identity; nothing is applied until you accept it.</p>",
+        unsafe_allow_html=True,
+    )
+
+    if st.button("Ask the assistant about the whole queue", key="agent_ask_all"):
+        with st.spinner(f"Investigating {len(items)} item(s)…"):
+            for item in items:
+                if st.session_state.agent_decisions.get(item["item_id"]) is None:
+                    _ask_agent_about_item(item["item_id"])
+        st.rerun()
+
+    for item in items:
+        item_id = item["item_id"]
+        display_name = item.get("additive_name") or (names or {}).get(item_id) or f"item {item_id}"
+        candidates = [f.split(":", 1)[1].strip() for f in (item.get("flags") or []) if f.startswith("candidate:")]
+
+        st.markdown(f"**{html.escape(display_name)}**", unsafe_allow_html=True)
+        if candidates:
+            st.caption("Possible matches: " + ", ".join(candidates))
+        else:
+            st.caption("No candidate match found -- needs manual identification.")
+
+        decision = st.session_state.agent_decisions.get(item_id)
+        proposal = st.session_state.agent_proposals.get(item_id)
+
+        if decision == "accepted":
+            st.success("Accepted -- the resolution and verdict were updated.")
+        elif decision == "rejected":
+            st.caption("Rejected -- left in the review queue.")
+            if st.button("Ask the assistant", key=f"agent_ask_{item_id}"):
+                with st.spinner("Investigating…"):
+                    _ask_agent_about_item(item_id)
+                st.rerun()
+        elif proposal is not None:
+            _render_agent_proposal(item_id, proposal)
+        else:
+            if st.button("Ask the assistant", key=f"agent_ask_{item_id}"):
+                with st.spinner("Investigating…"):
+                    _ask_agent_about_item(item_id)
+                st.rerun()
+
+        st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
+
+
 def render_results() -> None:
     verdict: ProductVerdict = st.session_state.verdict
     preview_verdict: ProductVerdict = st.session_state.preview_verdict
@@ -1029,7 +1301,11 @@ def render_results() -> None:
 
     item_dicts = [item.model_dump() for item in verdict.items]
     out_of_scope_items = [d for d in item_dicts if d["headline"] == "out_of_scope"]
-    review_items = [d for d in item_dicts if d["headline"] in _REVIEW_HEADLINES]
+    # Split, not one combined list: "unresolved" needs an IDENTITY (the
+    # agent below can help); "category_unknown" needs a food category --
+    # the existing category_confirm flow, unrelated to identity resolution.
+    identity_review_items = [d for d in item_dicts if d["headline"] == "unresolved"]
+    category_review_items = [d for d in item_dicts if d["headline"] == "category_unknown"]
     display_items = _merge_preview_candidates(verdict, preview_verdict)
     blocking_items = [display_items[i] for i in verdict.blocking]
     conflict_items = [display_items[i] for i in verdict.category_conflict]
@@ -1056,7 +1332,8 @@ def render_results() -> None:
     components.render_substitutes(substitute_result.model_dump())
     components.render_horizon(horizon_result.model_dump())
 
-    components.render_review_queue(review_items, names)
+    render_agent_review_queue(identity_review_items, names)
+    components.render_review_queue(category_review_items, names)
     components.render_out_of_scope(out_of_scope_items, names)
 
     render_export_section(verdict, substitute_result, horizon_result, narration, identity)

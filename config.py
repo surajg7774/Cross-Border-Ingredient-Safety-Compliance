@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     VERDICT_OUTPUT_DIR: Path = OUTPUT_DIR / "verdict"
     SUBSTITUTES_OUTPUT_DIR: Path = OUTPUT_DIR / "substitutes"
     HORIZON_OUTPUT_DIR: Path = OUTPUT_DIR / "horizon"
+    AGENT_OUTPUT_DIR: Path = OUTPUT_DIR / "agent"
+    AGENT_TRUTH_PATH: Path = Path("data/golden/agent_truth.json")
     LOG_OUTPUT_DIR: Path = OUTPUT_DIR / "logs"
     REFERENCE_DIR: Path = Path("data/reference")
 
