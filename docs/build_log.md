@@ -1,5 +1,137 @@
 # Build log
 
+## 2026-08-02 — LangGraph orchestration layer over the existing pipeline
+
+### Why
+
+Category recall@1 is measured at 0.53. Across F-06, F-13, and F-14, four
+retrieval methods, seven corpus constructions, and two fusion strategies
+were measured against ground truth and none beat the operating config.
+Human confirmation of the food category is therefore a design requirement,
+not a fallback -- and that confirmation was hand-rolled twice: a
+`--category` CLI flag applied AFTER a verdict was computed
+(`scripts/verdict.py`), and `app.py`'s manual pause/resume through
+`st.session_state` plus a stage marker and a full script rerun. LangGraph's
+`interrupt()` and `Command(resume=...)`, with durable checkpointing, is a
+built-in primitive for exactly that pattern. Composite products also have
+2-4 components each needing their own embedding call (real fan-out via
+`Send`), and substitutes/horizon both consume the verdict independently
+(real parallel branches) -- neither was expressed as such anywhere before.
+
+### What changed
+
+Added `src/graph/` -- an ADDITIONAL entry point, not a replacement. Every
+existing script (`extract.py`, `extract_text.py`, `resolve.py`,
+`classify_category.py`, `verdict.py`, `substitutes.py`, `horizon.py`) and
+`app.py` needed no changes at all: every node below calls the SAME pure
+function those scripts already call, nothing moved out of `src/category/`,
+`src/resolve/`, `src/rules/`, `src/substitutes/`, or `src/horizon/`.
+
+- **`src/graph/state.py`** -- `PipelineState` TypedDict. `category` and
+  `errors` are `Annotated` with reducers (a dict-merge, `operator.add`)
+  since the classify fan-out and the substitutes/horizon parallel branches
+  each write those keys within the same superstep -- LangGraph raises
+  `InvalidUpdateError` on an un-reduced key more than one node can write to
+  in one step.
+- **`src/graph/nodes.py`** -- one thin node per stage (`extract_node`,
+  `resolve_node`, `classify_node`, `confirm_node`, `verdict_node`,
+  `substitutes_node`, `horizon_node`, `narrate_node`), each a factory
+  closing over reference data loaded once at graph-construction time, never
+  re-read per node. `make_classify_dispatch` is the `path` function for
+  `add_conditional_edges` -- one `Send("classify", {...})` per component
+  query, real concurrent dispatch, or straight to `confirm` when there's
+  nothing to classify. `make_confirm_node(auto_confirm)` calls
+  `interrupt()` with `{component_label: [top-3 candidates]}` by default, or
+  accepts rank-1 for every query when `auto_confirm=True` (batch runs,
+  tests, no database). Every node's body is wrapped in try/except so a
+  stage failure lands in `state["errors"]` instead of crashing the graph.
+  `_join_category_results` here is a third independent copy of the
+  item-id -> `CategoryResult` join that `scripts/verdict.py`'s
+  `_build_item_category_map` and `app.py`'s `_apply_category_confirmations`
+  already duplicate -- kept as its own copy rather than a shared import,
+  matching the reasoning both of those functions' own docstrings already
+  give for why they don't share one either.
+- **`src/graph/pipeline.py`** -- `build_pipeline()` loads every reference
+  dataset and embeds the category corpus ONCE, builds one closure per node,
+  and wires `extract -> resolve -> [Send fan-out: classify per component]
+  -> confirm -> verdict -> [substitutes | horizon in parallel] -> narrate
+  -> END`, compiled with `InMemorySaver()` -- no database; state does not
+  survive past the process, the same durability `app.py`'s session-state
+  pause already had.
+- **`scripts/run_pipeline.py`** -- new CLI entry point. Runs the graph;
+  while `"__interrupt__" in result`, prints the retrieved top-3 per
+  component and prompts for a choice (blank = accept rank-1), then resumes
+  with `Command(resume=...)`. Writes every stage's output to the same
+  directory the matching standalone script would
+  (`data/outputs/{extraction,resolution,category,verdict,substitutes,horizon}`),
+  so a file this script writes is interchangeable with one the equivalent
+  standalone script wrote.
+
+### Files touched
+
+- `src/graph/__init__.py`, `state.py`, `nodes.py`, `pipeline.py` (new)
+- `scripts/run_pipeline.py` (new)
+- `tests/test_graph.py` (new)
+- `pyproject.toml` / `uv.lock` (added `langgraph>=1.2.10`)
+
+### Tests added
+
+- `tests/test_graph.py` (6) -- every function a node calls that would
+  otherwise need a real API key, network access, or reference data
+  (`run_extraction`, `resolve_items`, `embedding_scores`, `classify`,
+  `evaluate`, `find_substitutes`, `find_horizon_signals`, `narrate`) is
+  monkeypatched on `src.graph.nodes`'s own imported names -- no API calls
+  anywhere in the file. `build_queries` itself is left unmocked (pure,
+  already covered in `tests/test_category.py`, and it's what actually
+  produces the fan-out -- mocking it would mean never really testing the
+  `Send` dispatch). A test-local `_build_test_graph` wires the same
+  topology as `build_pipeline` with the real node factories over a
+  3-component fixture product. Covers: end-to-end run with
+  `auto_confirm=True`; a 3-component product dispatches exactly 3 classify
+  `Send`s; `interrupt()` pauses (`"__interrupt__"` present,
+  `graph.get_state(config).next == ("confirm",)`) and
+  `Command(resume=...)` populates `confirmed_categories`; a confirmed
+  category reaches `evaluate()` as an override on the correct item while an
+  unconfirmed component's item still sees the retrieved top-3 unchanged;
+  substitutes and horizon both run and both reach narrate; a
+  `resolve_items` exception lands in `state["errors"]` without crashing the
+  graph.
+
+**Total: 246 tests passing** (240 before this task + 6 new). `ruff check .`
+unchanged: 27 pre-existing errors, all in `src/codex/run_codex.py`,
+unrelated to this task -- `src/graph/`, `scripts/run_pipeline.py`, and
+`tests/test_graph.py` are all clean.
+
+### Verified, not just written
+
+- Confirmed the INSTALLED langgraph version (1.2.10) actually exposes
+  `StateGraph`, `interrupt`, `Command`, `Send` (`langgraph.types`), and
+  `InMemorySaver` (`langgraph.checkpoint.memory`) before writing against
+  them, per the task's explicit instruction not to rely on a remembered
+  API.
+- Smoke-tested `interrupt()`/`Command(resume=...)` and `Send` fan-out with
+  a dict-reducer state key in two standalone throwaway scripts first, to
+  confirm the exact return shape (`result["__interrupt__"]` is a list of
+  `Interrupt(value=..., id=...)`) before relying on it in `nodes.py` and
+  `run_pipeline.py`.
+- `uv run pytest` -- 246 passed.
+- `uv run ruff check .` -- pre-existing error count unchanged.
+- `uv run python scripts/run_pipeline.py --help` -- CLI wired correctly
+  (`--text`, `--name`, `--description`, `--auto-confirm`, `--log/--no-log`
+  all present).
+- Did not run the graph against a real label image end to end -- that
+  would call the Gemini API and the embedder for real, same as every other
+  script in this project. `run_pipeline.py`'s output-writing and
+  interrupt/resume loop are exercised structurally by the mocked test
+  suite instead.
+
+### Anything unexpected
+
+- None of the seven existing scripts or `app.py` needed any change at all
+  -- every node in `src/graph/nodes.py` calls the same pure function those
+  scripts already call, so the "additional entry point, not a replacement"
+  constraint held without a single adjustment to existing code.
+
 ## 2026-08-02 — Final report layer: verdict strip fix, narration, export, email
 
 ### What changed
