@@ -3,6 +3,8 @@ hand-built dicts standing in for the reference datasets -- no fixture files,
 no API calls (the embedder's network client is never instantiated here).
 """
 
+import pytest
+
 from src.category.chroma_store import build_chroma_index, chroma_scores
 from src.category.classifier import (
     build_queries,
@@ -11,10 +13,13 @@ from src.category.classifier import (
     embedding_scores,
     item_component_labels,
     mean_pairwise_similarity,
+    mmr_scores,
+    reciprocal_rank_fusion,
+    top_k,
 )
 from src.category.corpus import build_corpus, parse_food_categories, validate_corpus
 from src.category.embedder import _cache_key
-from src.category.experiment import CONFIGS
+from src.category.experiment import CONFIGS, ExperimentConfig
 from src.category.filter import permitted_in
 from src.category.schemas import CategoryQuery
 from src.category.tfidf import build_tfidf_index, tfidf_scores
@@ -606,6 +611,124 @@ def test_no_parent_inheritance_config_drops_ancestor_text():
     assert documents["7.2"] == "7.2 -- Fine bakery wares"
 
 
+def _eu_fip_row(canonical_id, food_category_raw, status="permitted", functional_classes=None):
+    return {
+        "canonical_id": canonical_id,
+        "food_category_raw": food_category_raw,
+        "status": status,
+        "functional_classes": functional_classes or [],
+    }
+
+
+def _codex_row(ins, functional_classes=None, parent_ins=None):
+    return {"ins": ins, "parent_ins": parent_ins, "functional_classes": functional_classes or []}
+
+
+# --------------------------------------------------------------------------- #
+# corpus_mode -- corpus-construction experiments (all default OFF; "full" is
+# the unchanged default and is exercised by every build_corpus(raw) call
+# above that passes no config).
+# --------------------------------------------------------------------------- #
+def test_name_only_corpus_mode_has_code_and_name_no_description_no_parent():
+    raw = [
+        _raw_category("7", "Bakery wares", "products prepared mainly with cereal flour"),
+        _raw_category("7.2", "Fine bakery wares", "should not appear"),
+    ]
+    _, documents, _ = build_corpus(raw, CONFIGS["name-only"])
+    assert documents["7.2"] == "7.2 -- Fine bakery wares"  # just code -- name, no description, no parent chain
+    assert "should not appear" not in documents["7.2"]
+    assert "Bakery wares" not in documents["7.2"]  # the ancestor's name, also excluded
+
+
+def test_name_plus_examples_extracts_the_example_sentence():
+    raw = [
+        _raw_category(
+            "1",
+            "Milk products",
+            "This category covers dairy products. Includes flavoured variants, e.g. chocolate milk and strawberry milk.",
+        )
+    ]
+    _, documents, _ = build_corpus(raw, CONFIGS["name-plus-examples"])
+    assert "e.g. chocolate milk and strawberry milk" in documents["1"]
+    assert "This category covers dairy products" not in documents["1"]  # non-example sentence dropped
+
+
+def test_name_plus_examples_falls_back_to_name_only_when_no_marker():
+    raw = [_raw_category("7.2", "Fine bakery wares", "products prepared mainly with cereal flour")]
+    _, documents, _ = build_corpus(raw, CONFIGS["name-plus-examples"])
+    assert documents["7.2"] == "7.2 -- Fine bakery wares"
+
+
+def test_strip_framing_removes_leading_stock_phrase_but_keeps_content():
+    raw = [_raw_category("1", "Dairy", "This category covers milk, cream and fermented products.")]
+    _, documents, _ = build_corpus(raw, CONFIGS["strip-framing"])
+    assert "This category covers" not in documents["1"]
+    assert "milk, cream and fermented products" in documents["1"]
+
+
+def test_strip_framing_does_not_touch_includes_that_introduces_content():
+    raw = [_raw_category("1", "Cream", "Includes chocolate-coated wafers and biscuits with cream filling.")]
+    _, documents, _ = build_corpus(raw, CONFIGS["strip-framing"])
+    assert "Includes chocolate-coated wafers and biscuits with cream filling" in documents["1"]
+
+
+def test_strip_framing_strips_includes_all_other_but_keeps_parent_inheritance():
+    raw = [
+        _raw_category("7", "Bakery wares", "This category comprises baked goods. Includes all other similar items."),
+        _raw_category("7.2", "Fine bakery wares", None),
+    ]
+    _, documents, _ = build_corpus(raw, CONFIGS["strip-framing"])
+    assert "This category comprises" not in documents["7.2"]
+    assert "Includes all other" not in documents["7.2"]
+    assert "baked goods" in documents["7.2"]  # parent inheritance still active, unlike name-only
+
+
+def test_enriched_corpus_mode_lists_functional_classes_of_permitted_additives():
+    raw = [_raw_category("1", "Test category", "irrelevant legal prose")]
+    eu_fip = [
+        _eu_fip_row("300", "1 test category", functional_classes=["Antioxidant"]),
+        _eu_fip_row("330", "1 test category", functional_classes=["Acidity regulator", "Antioxidant"]),
+        _eu_fip_row("471", "2 other category", functional_classes=["Emulsifier"]),  # different category -- excluded
+    ]
+    _, documents, _ = build_corpus(raw, CONFIGS["enriched"], eu_fip, [])
+    assert "Typically permits:" in documents["1"]
+    assert "antioxidant" in documents["1"]
+    assert "acidity regulator" in documents["1"]
+    assert "emulsifier" not in documents["1"]
+    assert "irrelevant legal prose" not in documents["1"]
+
+
+def test_enriched_corpus_mode_falls_back_to_codex_ins_for_empty_eu_fip_classes():
+    # THE MEASURED GAP: some eu_fip rows carry functional_classes=[] (the
+    # CXG 36 parent-row case) -- codex_ins's sub-type union must fill it in.
+    raw = [_raw_category("1", "Test category")]
+    eu_fip = [_eu_fip_row("170", "1 test category", functional_classes=[])]
+    codex_ins = [
+        _codex_row("170", functional_classes=[], parent_ins=None),
+        _codex_row("170(i)", functional_classes=["Colour"], parent_ins="170"),
+        _codex_row("170(ii)", functional_classes=["Colour", "Anticaking agent"], parent_ins="170"),
+    ]
+    _, documents, _ = build_corpus(raw, CONFIGS["enriched"], eu_fip, codex_ins)
+    assert "colour" in documents["1"]
+    assert "anticaking agent" in documents["1"]
+
+
+def test_enriched_corpus_mode_caps_class_list_at_ten():
+    raw = [_raw_category("1", "Test category")]
+    classes = [f"Class{i}" for i in range(15)]
+    eu_fip = [_eu_fip_row(str(300 + i), "1 test category", functional_classes=[cls]) for i, cls in enumerate(classes)]
+    _, documents, _ = build_corpus(raw, CONFIGS["enriched"], eu_fip, [])
+    clause = documents["1"].split("Typically permits: ", 1)[1]
+    listed = clause.rstrip(".").split(", ")
+    assert len(listed) == 10
+
+
+def test_enriched_corpus_mode_requires_eu_fip_and_codex_ins():
+    raw = [_raw_category("1", "Test category")]
+    with pytest.raises(ValueError, match="enriched"):
+        build_corpus(raw, CONFIGS["enriched"])
+
+
 def test_no_descriptor_config_drops_product_name_and_descriptor():
     items = [_item(0, 0, None, "Potato"), _item(1, 0, None, "Salt")]
     resolved = [_resolved(0, "food_ingredient"), _resolved(1, "food_ingredient")]
@@ -633,6 +756,126 @@ def test_filter_off_config_ranks_by_similarity_alone():
     assert result.top3[0].code == "1"
     assert result.top3[0].permitted is False
     assert result.empty_intersection is False
+
+
+def test_classify_passes_through_query_variants():
+    categories, _documents, _ = build_corpus([_raw_category("1", "Category One")])
+    eu_fip = []
+    query = CategoryQuery(scope="product", component_label=None, text="x", fields_used=[], additive_ids=[])
+
+    with_variants = classify(
+        query, embedding_scores([1.0], {"1": [1.0]}), categories, eu_fip, query_variants=["paraphrase one", "two"]
+    )
+    without_variants = classify(query, embedding_scores([1.0], {"1": [1.0]}), categories, eu_fip)
+
+    assert with_variants.query_variants == ["paraphrase one", "two"]
+    assert without_variants.query_variants == []
+
+
+# --------------------------------------------------------------------------- #
+# retrieval-strategy experiments -- MMR, multi-query fusion, hybrid fusion
+# (src/category/experiment.py's mmr_lambda / multi_query / hybrid fields).
+# All default off; classify() itself never knows which strategy, if any,
+# produced the scores dict it is handed (see its own docstring).
+# --------------------------------------------------------------------------- #
+def test_top_k_truncates_and_keeps_highest_scores():
+    assert top_k({"a": 1.0, "b": 3.0, "c": 2.0}, 2) == {"b": 3.0, "c": 2.0}
+
+
+def test_top_k_tolerates_k_larger_than_input():
+    assert top_k({"a": 1.0}, 5) == {"a": 1.0}
+
+
+def test_reciprocal_rank_fusion_favours_a_document_ranked_well_in_both_lists():
+    # "b" is never rank-1 alone (0.5 in the first ranking, 0.8 in the
+    # second -- lower than "a"'s 0.9), but it is well-placed in BOTH, and
+    # RRF should surface that over "a" (rank-1 in only one).
+    ranking1 = {"a": 0.9, "b": 0.5, "c": 0.1}
+    ranking2 = {"b": 0.8, "d": 0.6}
+
+    fused = reciprocal_rank_fusion([ranking1, ranking2], k=60)
+
+    assert fused["b"] == pytest.approx(1 / 62 + 1 / 61)
+    assert fused["a"] == pytest.approx(1 / 61)
+    assert fused["c"] == pytest.approx(1 / 63)
+    assert fused["d"] == pytest.approx(1 / 62)
+    assert fused["b"] > fused["a"]
+    assert fused["b"] > fused["d"]
+
+
+def test_reciprocal_rank_fusion_keeps_a_document_present_in_only_one_ranking():
+    fused = reciprocal_rank_fusion([{"a": 1.0}, {}], k=60)
+    assert fused == {"a": pytest.approx(1 / 61)}
+
+
+def test_mmr_selects_diverse_candidates_over_a_near_duplicate_cluster():
+    # THE MEASURED MOTIVATION: Khusmain's raw top-3 was 14.1.4/14.1/14 --
+    # three levels of ONE branch, all near-identical to the query and to
+    # each other. Reproduced synthetically: three near-duplicate vectors
+    # ("dup1/2/3", all close to the query AND to each other) plus three
+    # genuinely different ones ("far1/2/3", each less similar to the query
+    # but far from the dup cluster and from each other). Raw top-3 by
+    # similarity alone would be the three dups; MMR at a moderate lambda
+    # must pick from the far set too.
+    query_vector = [1.0, 0.0, 0.0]
+    embeddings = {
+        "dup1": [1.0, 0.10, 0.0],
+        "dup2": [1.0, 0.12, 0.0],
+        "dup3": [1.0, 0.08, 0.0],
+        "far1": [1.0, 0.0, 0.5],
+        "far2": [1.0, 0.0, -0.5],
+        "far3": [1.0, 0.0, 1.0],
+    }
+
+    raw_top3 = sorted(embeddings, key=lambda c: cosine_similarity(query_vector, embeddings[c]), reverse=True)[:3]
+    assert set(raw_top3) == {"dup1", "dup2", "dup3"}  # confirms the test setup reproduces the measured problem
+
+    selected = mmr_scores(query_vector, embeddings, lambda_=0.5, pool_size=6, select_n=3)
+
+    assert len(set(selected) & {"dup1", "dup2", "dup3"}) == 1  # the single best raw match is still picked...
+    assert not {"dup1", "dup2", "dup3"}.issubset(selected)  # ...but NOT all three near-duplicates
+    assert len(selected) == 3
+
+
+def test_mmr_lambda_1_reduces_to_plain_top_n_by_similarity():
+    # lambda=1.0 means diversity is weighted zero -- MMR must degrade
+    # exactly to raw top-N similarity ranking, a sanity check on the
+    # formula's boundary behaviour.
+    query_vector = [1.0, 0.0]
+    embeddings = {"a": [1.0, 0.0], "b": [1.0, 0.1], "c": [1.0, 5.0]}
+
+    selected = mmr_scores(query_vector, embeddings, lambda_=1.0, pool_size=3, select_n=2)
+
+    assert set(selected) == {"a", "b"}
+
+
+def test_mmr_returns_true_similarity_not_a_synthetic_score():
+    query_vector = [1.0, 0.0]
+    embeddings = {"a": [1.0, 0.0], "b": [0.0, 1.0]}
+    selected = mmr_scores(query_vector, embeddings, lambda_=0.5, pool_size=2, select_n=2)
+    assert selected["a"] == pytest.approx(cosine_similarity(query_vector, embeddings["a"]))
+
+
+def test_experiment_config_strategy_fields_default_off():
+    default = ExperimentConfig()
+    assert default.mmr_lambda is None
+    assert default.multi_query == 0
+    assert default.hybrid is False
+
+
+def test_retrieval_strategy_configs_registered():
+    assert CONFIGS["mmr-0.7"].mmr_lambda == 0.7
+    assert CONFIGS["mmr-0.7"].include_component_name is True
+    assert CONFIGS["mmr-0.5"].mmr_lambda == 0.5
+    assert CONFIGS["mqr-3"].multi_query == 3
+    assert CONFIGS["mqr-3"].include_component_name is True
+    assert CONFIGS["mqr-5"].multi_query == 5
+    assert CONFIGS["hybrid"].hybrid is True
+    assert CONFIGS["hybrid"].include_component_name is True
+    # None of these change the default config.
+    assert CONFIGS["baseline"].mmr_lambda is None
+    assert CONFIGS["baseline"].multi_query == 0
+    assert CONFIGS["baseline"].hybrid is False
 
 
 # --------------------------------------------------------------------------- #

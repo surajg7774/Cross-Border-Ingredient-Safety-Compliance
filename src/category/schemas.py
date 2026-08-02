@@ -57,3 +57,9 @@ class CategoryResult(BaseModel):
     empty_intersection: bool
     excluded_additives: list[str]  # additive ids with no permitted rows anywhere
     additive_breadth: dict[str, int]  # additive id -> how many categories permit it alone
+    # Extra query texts actually searched, beyond query.text itself --
+    # populated only when multi_query retrieval generated paraphrases
+    # (src.category.multiquery.generate_paraphrases); empty for every other
+    # config, including every other retrieval strategy. Recorded so a
+    # reader can see what was actually searched, not just what was asked.
+    query_variants: list[str] = Field(default_factory=list)

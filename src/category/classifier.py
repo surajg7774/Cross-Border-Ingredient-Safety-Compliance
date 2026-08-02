@@ -22,6 +22,9 @@ from src.resolve.schemas import ResolvedItem
 
 TOP_K_RETRIEVED = 10
 TOP_N_RESULT = 3
+MMR_POOL_SIZE = 20
+MMR_SELECT_N = 10
+RRF_K = 60
 
 _INGREDIENT_CLASSIFICATIONS = {"food_ingredient", "compound"}
 
@@ -42,6 +45,77 @@ def embedding_scores(query_embedding: list[float], embeddings: dict[str, list[fl
     scores.
     """
     return {code: cosine_similarity(query_embedding, vector) for code, vector in embeddings.items()}
+
+
+def top_k(scores: dict[str, float], k: int) -> dict[str, float]:
+    """The k highest-scoring entries, order-preserving-by-value (a plain
+    dict, so downstream consumers re-sort if they need rank order) --
+    shared truncation step before reciprocal_rank_fusion, since RRF must
+    see each input ranking already cut to what was actually "retrieved",
+    not the whole corpus."""
+    return dict(sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:k])
+
+
+def reciprocal_rank_fusion(rankings: list[dict[str, float]], k: int = RRF_K) -> dict[str, float]:
+    """Combine several already-truncated top-K score dicts into one fused
+    ranking: fused(d) = sum, over every ranking containing d, of
+    1 / (k + rank(d)) -- rank counted from 1 at that ranking's own top.
+    Standard Reciprocal Rank Fusion (Cormack, Clarke & Buettcher 2009);
+    k=60 is the constant from that paper, which flattens how much rank-1
+    dominates rank-2 relative to summing raw scores directly (raw
+    embedding similarity and TF-IDF similarity are not on the same scale
+    at all, so summing THEM directly would let whichever method's numbers
+    happen to run larger dominate the fusion for the wrong reason).
+    A document absent from one ranking contributes 0 from that ranking,
+    not disqualification -- it can still be favoured by the others.
+    """
+    fused: dict[str, float] = {}
+    for ranking in rankings:
+        ordered = sorted(ranking.items(), key=lambda kv: kv[1], reverse=True)
+        for rank, (code, _score) in enumerate(ordered, start=1):
+            fused[code] = fused.get(code, 0.0) + 1.0 / (k + rank)
+    return fused
+
+
+def mmr_scores(
+    query_vector: list[float],
+    embeddings: dict[str, list[float]],
+    lambda_: float,
+    pool_size: int = MMR_POOL_SIZE,
+    select_n: int = MMR_SELECT_N,
+) -> dict[str, float]:
+    """Maximal Marginal Relevance (Carbonell & Goldstein, 1998): from the
+    `pool_size` candidates nearest `query_vector` by raw cosine similarity,
+    iteratively pick the one maximising
+        lambda_ * sim(query, doc) - (1 - lambda_) * max sim(doc, selected)
+    until `select_n` are chosen -- each pick balances relevance to the
+    query against how different it is from what is ALREADY selected, so a
+    tight cluster of near-duplicate categories (e.g. three levels of one
+    branch: 14.1.4 / 14.1 / 14) cannot occupy every slot the way raw
+    top-N similarity does.
+
+    Returns code -> TRUE cosine similarity to the query (not a synthetic
+    MMR score) for the selected set ONLY -- MMR changes WHICH candidates
+    are considered, not what their similarity actually is, and classify()
+    re-ranks by permitted-status first regardless, so the selected pool's
+    real similarity numbers stay meaningful in the output.
+    """
+    similarities = {code: cosine_similarity(query_vector, vec) for code, vec in embeddings.items()}
+    pool = [code for code, _ in sorted(similarities.items(), key=lambda kv: kv[1], reverse=True)[:pool_size]]
+    remaining = set(pool)
+    selected: list[str] = []
+    while remaining and len(selected) < select_n:
+        if not selected:
+            next_code = max(remaining, key=lambda c: similarities[c])
+        else:
+            def _mmr_value(candidate: str) -> float:
+                diversity = max(cosine_similarity(embeddings[candidate], embeddings[s]) for s in selected)
+                return lambda_ * similarities[candidate] - (1 - lambda_) * diversity
+
+            next_code = max(remaining, key=_mmr_value)
+        selected.append(next_code)
+        remaining.discard(next_code)
+    return {code: similarities[code] for code in selected}
 
 
 def mean_pairwise_similarity(vectors: dict[str, list[float]]) -> float:
@@ -284,13 +358,24 @@ def classify(
     corpus: dict[str, FoodCategory],
     eu_fip: list[dict],
     config: ExperimentConfig = CONFIGS["baseline"],
+    query_variants: list[str] | None = None,
 ) -> CategoryResult:
     """Retrieve the 10 nearest categories by `scores` (code -> similarity,
-    already computed by the caller -- embedding_scores or
-    src.category.tfidf.tfidf_scores; classify() does not care which),
-    apply the deterministic additive-permission filter (unless
+    already computed by the caller -- embedding_scores, mmr_scores,
+    reciprocal_rank_fusion's output, or src.category.tfidf.tfidf_scores;
+    classify() does not care which). Every retrieval STRATEGY (MMR,
+    multi-query, hybrid) lives in the caller (scripts/classify_category.py)
+    -- classify() only ever consumes the resulting scores dict, deliberately,
+    so it never needs to know which strategy produced it.
+
+    Applies the deterministic additive-permission filter (unless
     config.intersection_filter is False -- the ablation that measures its
-    effect), and rank permitted matches first.
+    effect), and ranks permitted matches first.
+
+    query_variants is a pure passthrough -- the extra query texts actually
+    searched, when config.multi_query > 0 (empty otherwise) -- recorded on
+    the result so the output JSON shows what was actually searched, without
+    classify() itself knowing why they exist.
     """
     retrieved = sorted(scores.items(), key=lambda pair: pair[1], reverse=True)[:TOP_K_RETRIEVED]
 
@@ -330,4 +415,5 @@ def classify(
         empty_intersection=filter_result.empty_intersection,
         excluded_additives=filter_result.excluded_additives,
         additive_breadth=filter_result.breadth,
+        query_variants=query_variants or [],
     )

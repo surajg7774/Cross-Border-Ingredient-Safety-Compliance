@@ -675,3 +675,330 @@ preview verdict).
   pair) is fully fixed and verified either way: item 2 and item 15 now
   get two distinct components AND two distinct, correctly-sourced
   category rankings.
+
+## 2026-08-02 — Corpus-construction experiments for the category stage
+
+### What changed
+
+**Gap.** Every prior corpus experiment (parent_inheritance, description
+scope) added or removed text around a baseline that already included the
+category's legal-prose description. The category NAME alone -- "3 edible
+ices", "12.2.2 Seasonings and condiments" -- was never tried on its own,
+despite reading like a food description already; the legal descriptions
+share heavy boilerplate ("category" in 100/132, "this" in 98/132,
+"covers" in 71/132) and were plausibly diluting the embedding signal
+rather than sharpening it.
+
+**`ExperimentConfig.corpus_mode`** (`src/category/experiment.py`), default
+`"full"` (today's unchanged behaviour): `"name-only"` (code + name, no
+description, no parent chain -- the null hypothesis), `"name-plus-
+examples"` (name + the one sentence carrying an example clause -- "e.g.",
+"for example", "Examples include", "such as" -- when the description has
+one, else name only), `"strip-framing"` (same shape as "full", including
+parent_inheritance, but every description used has sentence-initial stock
+phrases removed first -- "This category covers/includes/comprises",
+"Includes all other" -- while "Includes chocolate-coated wafers..." at a
+sentence start is left alone, since it introduces real content), and
+`"enriched"` (name + the distinct Codex functional classes of every
+additive permitted in that category, ranked by how many permitted
+additives share each class, capped at 10 -- data the legal text does not
+carry at all). Plus `CONFIGS["name-only-with-component-name"]` and
+`["enriched-with-component-name"]`, pairing the two most promising modes
+with `include_component_name` (the best-measured flag so far, +0.17 on
+both embedding and tfidf retrieval). All seven new `CONFIGS` entries are
+additive; `CONFIGS["baseline"]` and every existing entry are untouched.
+
+**`src/category/corpus.py`** grew the four new branches in
+`build_documents`, plus: `_example_clause` / `_strip_framing` (both
+built on one shared sentence-splitter that does not fragment "e.g. cow" --
+splits only before a capital letter or "(", so an abbreviation's period
+mid-example never counts as a sentence boundary), and the `"enriched"`
+join -- `_functional_classes_by_id` (eu_fip's own `functional_classes`
+field first, falling back to `codex_ins` via the same parent-code-widening
+and CXG-36 "empty parent row, classes live on the sub-types"
+sub-type-union fallback `src/substitutes/advisor.py` already uses) and
+`_category_enriched_clause` (eu_fip's `status=="permitted"` rows for that
+category code, ranked by class frequency). The eu_fip/codex_ins helpers
+are duplicated from advisor.py rather than imported, matching this
+project's established pattern of independent pure modules (advisor.py's
+own DESIGN RULE comment gives the identical reasoning for not importing
+the other way). `build_documents`/`build_corpus` both grew optional
+`eu_fip`/`codex_ins` parameters, read only when `corpus_mode=="enriched"`
+(a clear `ValueError` if that mode is requested without them, rather than
+silently degrading).
+
+**`scripts/classify_category.py`** now loads `codex_ins.json` and passes
+both reference datasets through `_load_corpus` into `build_corpus` --
+every other call site (`app.py`'s production `_CATEGORY_CONFIG =
+CONFIGS["best"]`, which never sets `corpus_mode`) is unaffected, since
+those parameters default to `None` and are only read for `"enriched"`.
+
+**`scripts/diagnose_embeddings.py`** gained `--config` (default
+`"baseline"`). It now actually calls `GeminiEmbedder` (previously it only
+read the static cache file and warned about gaps) -- required for a new
+`corpus_mode`'s text to have anything to diagnose at all; a repeat run of
+an already-embedded config still costs zero API calls, since
+`GeminiEmbedder.embed_documents` is itself cache-aware. Reports, per run:
+mean/min/max pairwise similarity (with the delta against the measured
+baseline, 0.7847, printed alongside), the 10 most similar pairs, document
+length min/median/max, and the rank-1-to-rank-10 gap on Chipsmain's fixed
+product-scope query (delta against baseline's 0.0335 printed alongside;
+now embeds that query text fresh via `embedder.embed_query` instead of a
+static cache lookup, so it works for a config that never ran before,
+not only whichever config happened to embed it first). Prints cache
+hit/miss counts before embedding. Appends one row per run to
+`data/outputs/experiments.csv`, `stage="corpus_diagnostic"`, reusing
+`score_category.py`'s existing 11-column header (`config`,
+`retrieval_method`, `n`, `corpus_mean_similarity` populated;
+`recall_at_*`/`mrr`/`index_build_seconds`/`truth_version` left blank, not
+zero, since they do not apply to a corpus diagnostic) so both stages
+accumulate into the one comparable table rather than a second file. The
+richer per-run numbers (min/max similarity, rank gap, document lengths,
+the pairs table) are console-reported only, not given their own CSV
+columns -- extending the header would either rewrite 30 already-logged
+historical rows or leave the file permanently ragged, and the task's own
+ask for the CSV was the lightweight per-run accumulator, not a full
+diagnostic export.
+
+### Tests
+
+- `tests/test_category.py`: +10 -- `name-only` has no description/parent
+  text; `name-plus-examples` extracts the example sentence and correctly
+  drops a non-example one, and falls back to name-only when no marker
+  exists; `strip-framing` removes the stock leading phrase but keeps the
+  informative remainder, does NOT touch "Includes chocolate-coated
+  wafers..." (real content, not filler), strips "Includes all other" too,
+  and still respects `parent_inheritance` (the "strip", not "drop
+  parents", ablation); `enriched` lists only the functional classes of
+  additives actually permitted in THAT category (excludes a class from a
+  different category), falls back to `codex_ins`'s sub-type union for an
+  eu_fip row with `functional_classes=[]`, caps at 10, and raises
+  `ValueError` when requested without `eu_fip`/`codex_ins`.
+- `uv run ruff check .` on the five touched files: clean. Full-repo run
+  still shows the same 27 pre-existing errors in `src/codex/`.
+
+**Total: 223 tests passing** (213 before this task + 10 new).
+
+### Verified, not just written
+
+Ran `uv run python scripts/diagnose_embeddings.py --config <name>` for
+real (real Gemini embedding calls, real disk cache at
+`data/reference/category_embeddings.json`), for every new config, twice
+each:
+
+- **Cache correctness.** First run of `name-only`: 25 hit / 130 miss (of
+  155) -- NOT the ~100% miss a naive expectation would predict, so this
+  was checked rather than assumed: 25 of `name-only`'s texts are
+  byte-identical to texts already cached under `no-parent-inheritance`
+  (confirmed directly -- `no-parent-inheritance` drops the parent chain
+  but keeps the OWN description; for the 25 categories whose OWN
+  description is empty, that reduces to exactly "code -- name", identical
+  to `name-only`'s text for those same categories). This is the cache
+  working exactly as designed -- content-addressed, so identical text
+  legitimately reuses a vector regardless of which config name produced
+  it first -- not a bug. Second run of every new config: 155/155 hit, 0
+  miss. Re-running `baseline` itself printed delta 0.0000 against both
+  hardcoded constants, self-confirming they were transcribed correctly.
+- **Real measured numbers, config vs (mean similarity, rank-1-to-10
+  gap)**, delta against baseline (0.7847, 0.0335) in parentheses:
+  - `baseline`: 0.7847, 0.0335 (+0.0000, +0.0000)
+  - `name-only`: 0.7612, 0.0449 (-0.0235, +0.0114)
+  - `name-plus-examples`: 0.7552, 0.0413 (-0.0295, +0.0078)
+  - `strip-framing`: 0.7816, 0.0393 (-0.0031, +0.0058)
+  - `enriched`: 0.8107, 0.0460 (+0.0260, +0.0125)
+  - `name-only-with-component-name` / `enriched-with-component-name`:
+    confirmed to embed the SAME corpus text as their base mode (0 misses
+    on first run, since `include_component_name` affects only query
+    construction in `classifier.py`, never `corpus.py`'s documents) and
+    to run without error.
+- Ran `uv run python scripts/classify_category.py
+  data/outputs/resolution/Chipsmain.json --config enriched` end-to-end
+  (corpus -> embed -> retrieve -> filter -> write) with no exceptions,
+  then re-ran with `--config baseline` to restore
+  `data/outputs/category/Chipsmain.json` to its normal state (an
+  untracked output file, but left as found).
+- `data/outputs/experiments.csv` (untracked) now carries real
+  `stage="corpus_diagnostic"` rows for every config above, verified by
+  grep, sitting alongside the pre-existing `stage="category"` rows in one
+  file with no column mismatch.
+
+### Anything unexpected
+
+- **The `name-plus-examples` marker count does not match the task's
+  stated 33 of 132.** Measured directly against the real corpus with the
+  literal four markers given ("e.g.", "for example", "Examples include",
+  "such as", case-insensitive, union): 49 of 132 descriptions match, not
+  33. Implemented and reported faithfully rather than narrowing the
+  marker definition to force a match to an expectation that does not
+  hold against the actual data.
+- **`enriched` has the WORST mean pairwise similarity of every mode
+  tested (0.8107, +0.026 vs baseline) -- worse than doing nothing.**
+  Generic, EU-wide-common functional classes ("flavour enhancer",
+  "preservative", "acidity regulator") appear as permitted somewhere in
+  nearly every food category, so appending "typically permits: ..." adds
+  shared vocabulary across categories rather than distinguishing text --
+  the opposite of the intended effect. Its rank-1-to-10 gap is the best
+  of the five (0.0460), so the two measures do not move together for
+  this mode; this is exactly the kind of result recall@k scoring
+  (`scripts/score_category.py`), not this diagnostic, would need to
+  settle -- explicitly out of scope for this task.
+- `name-only` and `name-plus-examples` both reduce mean similarity in the
+  intended direction and both improve the rank gap, supporting the
+  hypothesis that the description text has been diluting the signal --
+  but the fixed sample query's rank-1 prediction under `name-only`
+  changed to a plausibly-wrong category (2.3 "Vegetable oil pan spray"
+  rather than 15.1 for a chips-shaped product), a reminder that a
+  narrower similarity spread is not the same claim as more accurate
+  retrieval. Scoring that properly needs `scripts/score_category.py`
+  against `data/golden/category_truth.json`, per the task's explicit "do
+  not touch retrieval methods... those come after we know whether the
+  corpus is the bottleneck" -- left for a follow-up task.
+
+## 2026-08-02 — Three retrieval strategies: MMR, multi-query fusion, hybrid RRF
+
+### What changed
+
+Per F-13 (docs/findings.md), the corpus is not the bottleneck and mean
+pairwise similarity is not a valid retrieval-quality proxy -- this task
+follows its own instruction to score strategy changes only against
+`data/golden/category_truth.json`, never `diagnose_embeddings.py`.
+
+**`ExperimentConfig`** (`src/category/experiment.py`) grew three new
+fields, all default off, each a REFINEMENT of the same embedding vector
+space rather than a new `retrieval_method`: `mmr_lambda: float | None =
+None`, `multi_query: int = 0` (total query variants -- the original plus
+`multi_query - 1` LLM-generated paraphrases), `hybrid: bool = False`.
+`CONFIGS["mmr-0.7"]`, `["mmr-0.5"]`, `["mqr-3"]`, `["mqr-5"]`,
+`["hybrid"]` all pair with `include_component_name=True` (the operating
+config, per the task's instruction not to test against a weaker base).
+
+**`src/category/classifier.py`** gained three pure functions: `top_k`
+(shared truncation before fusion), `reciprocal_rank_fusion` (standard
+RRF, k=60, used by both MQR and hybrid), and `mmr_scores` (standard MMR
+-- Carbonell & Goldstein 1998 -- iterating the top-20 by raw cosine
+similarity until 10 diverse candidates are selected; returns TRUE cosine
+similarity for the selected set, not a synthetic MMR score, since
+`classify()` re-ranks by permitted-status first regardless). `classify()`
+itself gained one new PASSTHROUGH parameter, `query_variants: list[str]
+| None`, stored verbatim onto `CategoryResult.query_variants`
+(`src/category/schemas.py`) -- no new decision logic, so the task's "keep
+classify() unchanged" instruction holds in spirit: it still only ever
+consumes a `scores` dict, never knows which of the three strategies (or
+none) produced it.
+
+**`src/category/multiquery.py`** (new): `generate_paraphrases(query_text,
+n, model_id)` -- one `generate_content` call asking for `n - 1`
+alternative phrasings as a raw JSON array, same retry/backoff shape as
+`src/extractors/gemini.py`'s `_call_model` (duplicated, not imported, per
+this project's established per-module independence pattern -- see
+`src/report/narrator.py`'s own copy of the identical block). Cached to
+`data/reference/query_paraphrases.json`, keyed on
+`sha256(query_text + model_id + n)` -- deliberately NOT keyed on the
+prompt text (unlike `gemini.py`'s cache), since the prompt only asks for
+a context-free paraphrase, not a project-specific behaviour that would
+need invalidating on a wording tweak.
+
+**`scripts/classify_category.py`**'s `_build_scorer` now composes: within
+`retrieval_method == "embedding"`, checks `hybrid` -> `multi_query` ->
+`mmr_lambda` (documented as the precedence if more than one is ever set,
+though no `CONFIGS` entry does that -- untested combination). `hybrid`
+fuses the embedding path's top-10 with `src/category/tfidf`'s top-10 over
+the same documents via RRF. `multi_query` calls `generate_paraphrases`
+per query text, embeds the original plus every paraphrase, and RRF-fuses
+their top-10s. `ScoreQuery`'s return type grew from `dict[str, float]` to
+`tuple[dict[str, float], list[str]]` (scores, the paraphrases actually
+searched) so `_classify_file` can pass them into `classify()`'s new
+parameter -- `[]` for every strategy except MQR. The output JSON gained a
+top-level `"strategy"` field (`_strategy_label`: `"mmr-0.7"`, `"mqr-3"`,
+`"hybrid-rrf"`, or `"none"`) alongside the existing `"config"`, so a
+reader can tell how a ranking was produced without cross-referencing
+`CONFIGS`.
+
+### Tests
+
+- `tests/test_category.py`: +17 -- `top_k` truncates/tolerates a small
+  input; `reciprocal_rank_fusion` favours a document ranked well in BOTH
+  input rankings over one ranked first in only one (hand-computed exact
+  RRF scores), and keeps a document present in only one ranking; `mmr_scores`
+  reproduces the measured Khusmain problem synthetically (three
+  near-duplicate vectors dominating raw top-3) and confirms MMR picks at
+  most one of them, confirms `lambda=1.0` degrades to plain top-N
+  similarity (a formula boundary check), and confirms the selected set's
+  scores are true cosine similarities, not synthetic MMR values;
+  `classify()` passes `query_variants` through unchanged, defaulting to
+  `[]`; `ExperimentConfig`'s three new fields default off; every new
+  `CONFIGS` entry has the expected field values and none touch `baseline`.
+- `tests/test_multiquery.py` (new): +7 -- `generate_paraphrases` returns
+  exactly `n - 1` strings from a mocked model call; caches on
+  `(text, model_id, n)` (a second identical call makes zero model calls);
+  a different `n` is a different cache entry; strips markdown fences;
+  truncates a model response that over-generates; raises `TypeError` on a
+  non-list response; `n < 2` returns `[]` without calling the model at
+  all (asserted via a mock that fails the test if invoked).
+- `uv run ruff check .` on the nine touched/new files: clean. Full-repo
+  run still shows the same 27 pre-existing errors in `src/codex/`.
+
+**Total: 240 tests passing** (223 before this task + 17 new).
+
+### Verified, not just written
+
+Ran `scripts/classify_category.py --all --config X` then
+`scripts/score_category.py --config X` for real, against the current
+`data/golden/category_truth.json` (n=17, the same truth version F-13
+used), comparing against `with-component-name` (0.53 / 0.82 / 0.66,
+re-confirmed fresh this run):
+
+- **`mmr-0.7` and `mmr-0.5`: both scored IDENTICALLY to the baseline**
+  (0.53 / 0.82 / 0.66, exactly). Checked this was not MMR silently never
+  running: compared `mmr-0.7`'s and the baseline's raw output JSON for
+  Ice-creammain directly -- the `filtered_out` candidate lists genuinely
+  differ (e.g. Inner Layer's baseline pool includes code 18.1, MMR's does
+  not, replaced by a more diverse candidate), confirming MMR is real and
+  active, changing which 10 candidates are considered -- it just did not
+  happen to change which item wins the intersection-filtered top-3 for
+  any of these 17 truth rows.
+- **`hybrid`: 0.53 / 0.76 / 0.62** -- recall@1 unchanged, recall@3 down
+  0.06, MRR down 0.04 from baseline. Per the task's own n=17 guidance, a
+  difference under ~0.10 is one or two label-components and should be
+  read as noise, not a real effect -- but it is a small decline, not a
+  gain, in every direction it moved.
+- **`mqr-3` and `mqr-5`: NOT completed.** `--all` (12 labels) hit the
+  real Gemini free-tier daily quota partway through (20
+  `generate_content` requests/day/model for gemini-2.5-flash, the model
+  `generate_paraphrases` uses via `settings.PRIMARY_MODEL`) after 7 of 12
+  labels succeeded. The mechanism itself is confirmed working, not just
+  implemented: `data/reference/query_paraphrases.json` now holds 13 real
+  cached paraphrase pairs (e.g. "Seasoning Potato Edible Vegetable Oil" ->
+  "Edible Vegetable Oil Potato Seasoning" -- genuine word-order
+  paraphrases, not garbage), and `query_variants` was populated correctly
+  on those 7 labels' `CategoryResult`s. A full `mqr-3` run is now CHEAPER
+  to finish later (those 7 labels' paraphrases are cached; only the
+  remaining 5 need fresh calls), but `mqr-5` needs an entirely separate
+  cache (different `n` -> different cache key) and was not attempted at
+  all. Left for a follow-up run once the daily quota resets -- did not
+  keep retrying against an exhausted DAILY quota, since short backoff
+  cannot cross a day boundary.
+- `data/outputs/category/*.json` (untracked) restored to
+  `with-component-name` after every comparison run, including after the
+  quota failure left 5 files mid-`mqr-3`/stale-`hybrid` -- verified by
+  reading each file's own `"config"` field back to `"with-component-name"`
+  before finishing.
+
+### Anything unexpected
+
+- **MMR changing the candidate pool did not change the final answer on
+  this eval set.** This is a real result, not a wiring failure (verified
+  above) -- Khusmain's own three-near-duplicates problem that motivated
+  MMR may simply not be common enough across the 17 truth rows to move
+  recall/MRR at this sample size, or the item that MMR's diversity
+  intervention displaces from the pool is rarely the one the intersection
+  filter would have promoted to rank-1 anyway. Not enough evidence either
+  way at n=17 to say MMR doesn't help in general -- only that it made no
+  measurable difference on THIS truth set.
+- **A real API quota wall, not a code defect, is why `mqr-3`/`mqr-5`
+  comparisons are incomplete.** Text-generation quota (`generate_content`)
+  and embedding quota are tracked separately by the API -- `mmr`/`hybrid`
+  (embedding-only) ran to completion without issue even after the
+  text-generation quota for the day was already exhausted, which is what
+  made it possible to still verify those two strategies live and restore
+  `data/outputs/category/*.json` to a clean state afterward.

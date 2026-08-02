@@ -101,3 +101,107 @@ Decision: automated ingestion was attempted and abandoned. The horizon lane
 (src/horizon/) runs on a hand-curated dataset instead
 (data/reference/horizon_signals.json); automated OpenFoodTox ingestion is
 documented as future work requiring an E-number-to-CAS crosswalk.
+
+## F-13 — Corpus reformatting refuted; the compression metric is not a proxy
+Hypothesis (motivated by F-06's 0.7847 mean pairwise similarity across 155
+unrelated documents): the EU regulatory descriptions dilute retrieval
+signal, and the category name alone would separate better.
+
+Seven corpus_mode variants scored against golden truth (n=17), recall@1 /
+recall@3 / MRR:
+  with-component-name (full, operating config)    0.53 / 0.82 / 0.66
+  baseline (full, no component name)              0.41 / 0.65 / 0.53
+  strip-framing                                   0.47 / 0.65 / 0.55
+  name-only-with-component-name                   0.41 / 0.71 / 0.55
+  name-only                                       0.35 / 0.71 / 0.51
+  enriched                                        0.35 / 0.65 / 0.50
+  name-plus-examples                              0.35 / 0.59 / 0.47
+
+Refuted. No corpus_mode beats the "full" text it was reformatted from:
+name-only-with-component-name (0.41/0.71/0.55) sits well below
+with-component-name (0.53/0.82/0.66); name-only and name-plus-examples both
+score below plain baseline on recall@1 and MRR. The descriptions carry real
+signal.
+
+Separately: name-plus-examples had the LOWEST mean pairwise similarity
+(0.7552) of every mode measured AND the worst recall@3 (0.59) — the one
+case where the two moved together. strip-framing had a NEGLIGIBLE
+similarity delta (-0.0031) but a real, if small, recall@1/MRR gain over
+plain baseline (0.47/0.55 vs 0.41/0.53) that the similarity number alone
+would have hidden; enriched had a WORSE similarity delta (+0.0260 —
+generic functional classes like "flavour enhancer" are common across
+categories and add shared vocabulary rather than distinguishing text) but
+scored no worse than plain baseline on recall@3. Mean pairwise similarity
+is therefore not a valid proxy for retrieval quality; prior reasoning that
+treated 0.78 as "the ceiling" (F-06) was unsound.
+
+Decision: corpus_mode stays "full" (its existing default); with-component-
+name remains the operating config (F-06). strip-framing's small gain is
+within noise at n=17 and far short of with-component-name either way — not
+pursued further without a larger truth set.
+
+
+## F-14 — Retrieval strategy is not the bottleneck either
+
+Following F-13 (corpus reformatting refuted), three retrieval strategies were
+implemented as configs and scored against data/golden/category_truth.json
+(n=17), compared to the operating config `with-component-name`
+(0.53 / 0.82 / 0.66):
+
+    with-component-name (operating)   0.53 / 0.82 / 0.66
+    mmr-0.7                           0.53 / 0.82 / 0.66   identical
+    mmr-0.5                           0.53 / 0.82 / 0.66   identical
+    hybrid RRF (dense + TF-IDF)       0.53 / 0.76 / 0.62   down
+    mqr-3 / mqr-5                     incomplete — see below
+
+**MMR is inert on this eval set, and provably so rather than by omission.**
+The raw candidate pools DO differ from baseline (verified in the output JSON),
+but the difference disappears after the permitted-filter and the top-3 cut.
+The case that motivated MMR — Khusmain retrieving 14.1.4, 14.1 and 14, three
+levels of one branch — is not common enough across 17 label-components to
+move any metric. Either the ancestor-clustering pattern is rarer than assumed,
+or diversification displaces candidates the intersection filter would have
+promoted anyway.
+
+**Hybrid RRF declined.** Motivation was that `include_component_name` gave
++0.17 on BOTH dense and sparse retrieval (F-06), suggesting literal token
+overlap carries signal the dense retriever misses. In practice TF-IDF's
+standalone 0.24 is too weak to fuse productively with a 0.82 ranking. At
+n=17, −0.06 is one label-component and is within noise, but it moved down in
+every measure, not up.
+
+**MQR could not be completed.** Multi-query retrieval hit the Gemini free-tier
+`generate_content` daily quota at label 7 of 12. Text-generation quota is
+tracked separately from embedding quota, which is why the embedding-only
+configs completed and this one did not. The mechanism is implemented and
+verified — data/reference/query_paraphrases.json holds real cached paraphrase
+pairs and `query_variants` is correctly populated on the seven processed
+labels — but it is not scored. Left as open work; the seven cached labels make
+a follow-up run cheaper.
+
+### Conclusion across F-06, F-13 and F-14
+
+Four retrieval methods (embedding, TF-IDF, ChromaDB, hybrid), seven corpus
+constructions, and two diversification/fusion strategies have been measured
+against ground truth. **None beats the original corpus with the
+component-name query augmentation.**
+
+The residual failures do not look like retrieval failures. Parle-Gmain's
+query is `REFINED WHEAT FLOUR SUGAR REFINED PALM OIL`, which genuinely
+describes a biscuit, a cake and a cracker equally well; Chocolatemain's
+`Centre` component missed under all seven corpus modes and all retrieval
+strategies. The information required to distinguish these is not present in
+the ingredient declaration.
+
+Decision: retrieval work stopped. Category recall@1 = 0.53 is treated as a
+property of the task, not a defect to be tuned away. Correctness is protected
+by mandatory human confirmation of the category before any verdict is
+computed (see the --category override and the UI confirmation step), and by
+the rule engine refusing to report a blocking verdict when it depends on an
+unconfirmed category.
+
+### Caveat on all of the above
+
+n=17 with AI-drafted, unverified ground truth. Differences under ~0.10 are one
+or two label-components. These are directional findings suitable for comparing
+configurations against each other, not validated accuracy claims.

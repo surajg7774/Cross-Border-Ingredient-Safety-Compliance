@@ -39,14 +39,19 @@ from src.category.chroma_store import (
     chroma_scores,
 )
 from src.category.classifier import (
+    TOP_K_RETRIEVED,
     build_queries,
     classify,
     embedding_scores,
     mean_pairwise_similarity,
+    mmr_scores,
+    reciprocal_rank_fusion,
+    top_k,
 )
 from src.category.corpus import build_corpus
 from src.category.embedder import GeminiEmbedder
 from src.category.experiment import CONFIGS, ExperimentConfig
+from src.category.multiquery import generate_paraphrases
 from src.category.tfidf import build_tfidf_index, tfidf_mean_pairwise_similarity, tfidf_scores
 from src.logging_setup import setup_run_log
 from src.resolve.schemas import ResolvedItem
@@ -62,7 +67,10 @@ console = Console()
 # always takes precedence (see _resolve_description).
 DESCRIPTIONS_PATH = Path("data/labels/descriptions.json")
 
-ScoreQuery = Callable[[str], dict[str, float]]
+# (scores, query_variants) -- query_variants is the extra paraphrase texts
+# actually searched (multi_query only, [] for every other strategy), so
+# _classify_file can pass them through to classify() for the output JSON.
+ScoreQuery = Callable[[str], tuple[dict[str, float], list[str]]]
 
 
 def _load_json(path: Path, default):
@@ -71,9 +79,9 @@ def _load_json(path: Path, default):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _load_corpus(config: ExperimentConfig) -> tuple[dict, dict]:
+def _load_corpus(config: ExperimentConfig, eu_fip: list[dict], codex_ins: list[dict]) -> tuple[dict, dict]:
     raw_categories = _load_json(settings.REFERENCE_DIR / "food_categories.json", [])
-    categories, documents, flags = build_corpus(raw_categories, config)
+    categories, documents, flags = build_corpus(raw_categories, config, eu_fip, codex_ins)
     for flag in flags:
         console.print(
             f"[yellow]Note:[/yellow] category {flag.code} description excluded -- "
@@ -106,6 +114,12 @@ def _build_scorer(
     index_build_seconds is the cost side of the tfidf/chromadb comparison
     against plain embedding -- None (blank in experiments.csv) for
     "embedding", which builds no index to time.
+
+    Within "embedding", config.mmr_lambda / multi_query / hybrid are
+    composable REFINEMENTS of the same vector space (see ExperimentConfig's
+    docstring) -- checked in this order, mutually exclusive in every
+    CONFIGS entry so far (their combined effect is untested; if more than
+    one is set, hybrid wins, then multi_query, then mmr_lambda).
     """
     if config.retrieval_method == "tfidf":
         start = time.perf_counter()
@@ -113,8 +127,8 @@ def _build_scorer(
         index_build_seconds = time.perf_counter() - start
         corpus_mean_similarity = tfidf_mean_pairwise_similarity(index)
 
-        def score_query(text: str) -> dict[str, float]:
-            return tfidf_scores(index, text)
+        def score_query(text: str) -> tuple[dict[str, float], list[str]]:
+            return tfidf_scores(index, text), []
 
         return score_query, corpus_mean_similarity, index_build_seconds
 
@@ -127,8 +141,8 @@ def _build_scorer(
         index = build_chroma_index(documents, embeddings)
         index_build_seconds = time.perf_counter() - start
 
-        def score_query(text: str) -> dict[str, float]:
-            return chroma_scores(index, embedder.embed_query(text))
+        def score_query(text: str) -> tuple[dict[str, float], list[str]]:
+            return chroma_scores(index, embedder.embed_query(text)), []
 
         return score_query, corpus_mean_similarity, index_build_seconds
 
@@ -136,8 +150,37 @@ def _build_scorer(
     embeddings = embedder.embed_documents(documents)
     corpus_mean_similarity = mean_pairwise_similarity(embeddings)
 
-    def score_query(text: str) -> dict[str, float]:
-        return embedding_scores(embedder.embed_query(text), embeddings)
+    if config.hybrid:
+        tfidf_index = build_tfidf_index(documents)
+
+        def score_query(text: str) -> tuple[dict[str, float], list[str]]:
+            embedding_ranking = top_k(embedding_scores(embedder.embed_query(text), embeddings), TOP_K_RETRIEVED)
+            tfidf_ranking = top_k(tfidf_scores(tfidf_index, text), TOP_K_RETRIEVED)
+            return reciprocal_rank_fusion([embedding_ranking, tfidf_ranking]), []
+
+        return score_query, corpus_mean_similarity, None
+
+    if config.multi_query > 0:
+
+        def score_query(text: str) -> tuple[dict[str, float], list[str]]:
+            paraphrases = generate_paraphrases(text, config.multi_query, settings.PRIMARY_MODEL)
+            rankings = [
+                top_k(embedding_scores(embedder.embed_query(variant), embeddings), TOP_K_RETRIEVED)
+                for variant in (text, *paraphrases)
+            ]
+            return reciprocal_rank_fusion(rankings), paraphrases
+
+        return score_query, corpus_mean_similarity, None
+
+    if config.mmr_lambda is not None:
+
+        def score_query(text: str) -> tuple[dict[str, float], list[str]]:
+            return mmr_scores(embedder.embed_query(text), embeddings, config.mmr_lambda), []
+
+        return score_query, corpus_mean_similarity, None
+
+    def score_query(text: str) -> tuple[dict[str, float], list[str]]:
+        return embedding_scores(embedder.embed_query(text), embeddings), []
 
     return score_query, corpus_mean_similarity, None
 
@@ -154,6 +197,21 @@ def _resolve_description(label: str, cli_description: str | None, descriptions: 
     if fixture_description is not None:
         return fixture_description, "descriptions_file"
     return None, "none"
+
+
+def _strategy_label(config: ExperimentConfig) -> str:
+    """A human-readable name for which retrieval strategy is active, for
+    the output JSON -- so a reader can tell how a ranking was produced
+    without cross-referencing config.name against CONFIGS' field values.
+    "none" covers plain embedding/tfidf/chromadb retrieval, no strategy
+    layered on top."""
+    if config.hybrid:
+        return "hybrid-rrf"
+    if config.multi_query > 0:
+        return f"mqr-{config.multi_query}"
+    if config.mmr_lambda is not None:
+        return f"mmr-{config.mmr_lambda}"
+    return "none"
 
 
 def _classify_file(
@@ -198,8 +256,8 @@ def _classify_file(
                 f"{query.component_label!r} has no query text, skipping[/yellow]"
             )
             continue
-        scores = score_query(query.text)
-        results.append(classify(query, scores, categories, eu_fip, config))
+        scores, query_variants = score_query(query.text)
+        results.append(classify(query, scores, categories, eu_fip, config, query_variants))
 
     table = Table(title=extraction_path.name)
     table.add_column("Scope")
@@ -230,6 +288,7 @@ def _classify_file(
     payload = {
         "config": config.name,
         "retrieval_method": config.retrieval_method,
+        "strategy": _strategy_label(config),
         "corpus_mean_similarity": corpus_mean_similarity,
         "index_build_seconds": index_build_seconds,
         "description_source": description_source,
@@ -288,8 +347,9 @@ def main(
     config = CONFIGS[config_name]
 
     eu_fip = _load_json(settings.REFERENCE_DIR / "eu_fip.json", [])
+    codex_ins = _load_json(settings.REFERENCE_DIR / "codex_ins.json", [])
     descriptions = _load_json(DESCRIPTIONS_PATH, {})
-    categories, documents = _load_corpus(config)
+    categories, documents = _load_corpus(config, eu_fip, codex_ins)
     score_query, corpus_mean_similarity, index_build_seconds = _build_scorer(config, documents)
     build_text = f", index build: {index_build_seconds:.4f}s" if index_build_seconds is not None else ""
     console.print(
