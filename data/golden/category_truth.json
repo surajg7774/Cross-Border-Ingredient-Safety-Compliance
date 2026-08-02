@@ -1,0 +1,26 @@
+{
+  "_meta": {
+    "review_status": "DRAFT",
+    "n_labels": 9,
+    "note": "Drafted from the label images, not independently re-verified against the EU category text. Correct by hand before treating scores as validation rather than a regression baseline. Component entries for Chips/EU_product/Parle-G added after the additive-scoping fix (E551 belongs to the Seasoning/INVERT SUGAR SYRUP component, not the product) -- still DRAFT, re-verify against the label images."
+  },
+  "truth": {
+    "Chipsmain":      [{"component": null,        "code": "15.1"},
+                       {"component": "Seasoning", "code": "12.2.2"}],
+    "Chipsraw":       [{"component": null,        "code": "15.1"},
+                       {"component": "Seasoning", "code": "12.2.2"}],
+    "EU_productmain": [{"component": null,        "code": "15.1"},
+                       {"component": "SEASONING", "code": "12.2.2"}],
+    "Parle-Gmain":    [{"component": null,        "code": "7.2"}],
+    "Pepsimain":      [{"component": null, "code": "14.1.4"}],
+    "Chocolatemain":  [{"component": "Milk Chocolate", "code": "5.1"},
+                       {"component": "Centre", "code": "5.2"}],
+    "Chocolateraw":   [{"component": "Milk Chocolate", "code": "5.1"},
+                       {"component": "Centre", "code": "5.2"}],
+    "Ice-creammain":  [{"component": "Inner Layer", "code": "3"},
+                       {"component": "Outer Layer", "code": "5.1"}],
+    "Noodlesraw":     [{"component": "Noodles", "code": "6.5"},
+                       {"component": "Masala TASTEMAKER®", "code": "12.2"}],
+    "Khusmain": [{"component": null, "code": "14.1.4"}]
+  }
+}

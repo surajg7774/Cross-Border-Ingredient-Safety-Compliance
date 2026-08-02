@@ -1,0 +1,239 @@
+{
+  "gate": {
+    "is_food_label": true,
+    "has_ingredients_declaration": true,
+    "confidence": 0.4,
+    "evidence_found": [
+      "ingredients_keyword",
+      "e_number_pattern"
+    ],
+    "reject_reason": null,
+    "product_name": null,
+    "product_descriptor": null,
+    "languages_detected": [
+      "en"
+    ],
+    "language_selected": "en",
+    "ingredients_panel_bbox": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "warnings": [
+      "ingredients panel not localised \u2014 crop+upscale accuracy step skipped"
+    ]
+  },
+  "extraction": {
+    "declaration_verbatim": "INGREDIENTS : REFINED WHEAT FLOUR (MAIDA ) (68%), SUGAR, REFINED PALM OIL, INVERT SUGAR SYRUP# [SUGAR, CITRIC ACID], IODISED SALT, RAISING AGENTS [503 ( ii ), 500 (ii)], MILK SOLIDS, FLOUR TREATMENT AGENT [1101 ( ii )] AND EMULSIFIER OF VEGETABLE ORIGIN [472e] CONTAINS ADDED FLAVOUR ( ARTIFICIAL FLAVOURING SUBSTANCES - VANILLA ) #(D - GLUCOSE, LEVULOSE ) CONTAINS : WHEAT, MILK",
+    "language": "en",
+    "items": [
+      {
+        "item_id": 0,
+        "position": 0,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "REFINED WHEAT FLOUR (MAIDA ) (68%)",
+        "name_as_declared": "REFINED WHEAT FLOUR",
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": null,
+        "code_system": "none",
+        "percentage": 68.0,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 1,
+        "position": 1,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "SUGAR",
+        "name_as_declared": "SUGAR",
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": null,
+        "code_system": "none",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 2,
+        "position": 2,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "REFINED PALM OIL",
+        "name_as_declared": "REFINED PALM OIL",
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": null,
+        "code_system": "none",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 3,
+        "position": 3,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "INVERT SUGAR SYRUP# [SUGAR, CITRIC ACID]",
+        "name_as_declared": "INVERT SUGAR SYRUP",
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": null,
+        "code_system": "none",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": "#",
+        "confidence": 1.0
+      },
+      {
+        "item_id": 4,
+        "position": 3,
+        "nesting_depth": 1,
+        "parent_item_id": 3,
+        "verbatim": "SUGAR",
+        "name_as_declared": "SUGAR",
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": null,
+        "code_system": "none",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 5,
+        "position": 3,
+        "nesting_depth": 1,
+        "parent_item_id": 3,
+        "verbatim": "CITRIC ACID",
+        "name_as_declared": "CITRIC ACID",
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": null,
+        "code_system": "none",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 6,
+        "position": 4,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "IODISED SALT",
+        "name_as_declared": "IODISED SALT",
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": null,
+        "code_system": "none",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 7,
+        "position": 5,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "503 ( ii )",
+        "name_as_declared": null,
+        "declared_role": "RAISING AGENTS",
+        "role_source": "group_heading",
+        "declared_code": "503 ( ii )",
+        "code_system": "bare",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 8,
+        "position": 5,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "500 (ii)",
+        "name_as_declared": null,
+        "declared_role": "RAISING AGENTS",
+        "role_source": "group_heading",
+        "declared_code": "500 (ii)",
+        "code_system": "bare",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 9,
+        "position": 6,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "MILK SOLIDS",
+        "name_as_declared": "MILK SOLIDS",
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": null,
+        "code_system": "none",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 10,
+        "position": 7,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "1101 ( ii )",
+        "name_as_declared": null,
+        "declared_role": "FLOUR TREATMENT AGENT",
+        "role_source": "group_heading",
+        "declared_code": "1101 ( ii )",
+        "code_system": "bare",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 11,
+        "position": 8,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "472e",
+        "name_as_declared": null,
+        "declared_role": "EMULSIFIER OF VEGETABLE ORIGIN",
+        "role_source": "group_heading",
+        "declared_code": "472e",
+        "code_system": "bare",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      }
+    ],
+    "unparsed_fragments": [],
+    "warnings": [
+      "declaration is uniformly styled; emphasis not determinable"
+    ],
+    "allergen_statements": [
+      "CONTAINS : WHEAT, MILK"
+    ],
+    "footnotes": {
+      "#": "(D - GLUCOSE, LEVULOSE )"
+    },
+    "declaration_statements": [
+      "CONTAINS ADDED FLAVOUR ( ARTIFICIAL FLAVOURING SUBSTANCES - VANILLA )"
+    ]
+  },
+  "stop_reason": null
+}

@@ -1,0 +1,543 @@
+{
+  "items": [
+    {
+      "item_id": 0,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 1,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Refined wheat flour"
+    },
+    {
+      "item_id": 2,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Palm oil"
+    },
+    {
+      "item_id": 3,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Iodized salt"
+    },
+    {
+      "item_id": 4,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Wheat gluten"
+    },
+    {
+      "item_id": 5,
+      "canonical_ins": "508",
+      "eu_canonical_id": "508",
+      "classification": "additive",
+      "normalised_role": "Thickener",
+      "codex_functional_classes": [
+        "Flavour enhancer",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "508"
+    },
+    {
+      "item_id": 6,
+      "canonical_ins": "412",
+      "eu_canonical_id": "412",
+      "classification": "additive",
+      "normalised_role": "Thickener",
+      "codex_functional_classes": [
+        "Emulsifier",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "412"
+    },
+    {
+      "item_id": 7,
+      "canonical_ins": "501(i)",
+      "eu_canonical_id": "501",
+      "classification": "additive",
+      "normalised_role": "Acidity regulator",
+      "codex_functional_classes": [
+        "Acidity regulator",
+        "Stabilizer"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [
+        "eu_widened_to_parent"
+      ],
+      "candidates": [],
+      "matched_on": "501(i)"
+    },
+    {
+      "item_id": 8,
+      "canonical_ins": "500(ii)",
+      "eu_canonical_id": "500(ii)",
+      "classification": "additive",
+      "normalised_role": "Acidity regulator",
+      "codex_functional_classes": [
+        "Acidity regulator",
+        "Anticaking agent",
+        "Raising agent",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "500(ii)"
+    },
+    {
+      "item_id": 9,
+      "canonical_ins": "451(i)",
+      "eu_canonical_id": "451",
+      "classification": "additive",
+      "normalised_role": "Humectant",
+      "codex_functional_classes": [
+        "Emulsifying salt",
+        "Humectant",
+        "Sequestrant",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [
+        "eu_widened_to_parent"
+      ],
+      "candidates": [],
+      "matched_on": "451(i)"
+    },
+    {
+      "item_id": 10,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 11,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 12,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Onion powder"
+    },
+    {
+      "item_id": 13,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Coriander powder"
+    },
+    {
+      "item_id": 14,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 15,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Turmeric powder"
+    },
+    {
+      "item_id": 16,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Garlic powder"
+    },
+    {
+      "item_id": 17,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Cumin powder"
+    },
+    {
+      "item_id": 18,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 19,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Ginger powder"
+    },
+    {
+      "item_id": 20,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 21,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 22,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 23,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 24,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 25,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 26,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 27,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Refined wheat flour"
+    },
+    {
+      "item_id": 28,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Sugar"
+    },
+    {
+      "item_id": 29,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Starch"
+    },
+    {
+      "item_id": 30,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Palm oil"
+    },
+    {
+      "item_id": 31,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Iodized salt"
+    },
+    {
+      "item_id": 32,
+      "canonical_ins": "508",
+      "eu_canonical_id": "508",
+      "classification": "additive",
+      "normalised_role": "Thickener",
+      "codex_functional_classes": [
+        "Flavour enhancer",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "508"
+    },
+    {
+      "item_id": 33,
+      "canonical_ins": "330",
+      "eu_canonical_id": "330",
+      "classification": "additive",
+      "normalised_role": "Acidity regulator",
+      "codex_functional_classes": [
+        "Acidity regulator",
+        "Antioxidant",
+        "Colour-retention agent"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "330"
+    },
+    {
+      "item_id": 34,
+      "canonical_ins": "635",
+      "eu_canonical_id": "635",
+      "classification": "additive",
+      "normalised_role": "Flavour enhancer",
+      "codex_functional_classes": [
+        "Flavour enhancer"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "635"
+    },
+    {
+      "item_id": 35,
+      "canonical_ins": "150d",
+      "eu_canonical_id": "150d",
+      "classification": "additive",
+      "normalised_role": "Colour",
+      "codex_functional_classes": [
+        "Colour"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "150d"
+    },
+    {
+      "item_id": 36,
+      "canonical_ins": "905a",
+      "eu_canonical_id": "905a",
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Glazing agent"
+      ],
+      "resolution_method": "fuzzy",
+      "resolution_confidence": 0.8,
+      "flags": [
+        "fuzzy_match"
+      ],
+      "candidates": [],
+      "matched_on": "Mineral (score 100.0)"
+    },
+    {
+      "item_id": 37,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Wheat gluten"
+    }
+  ],
+  "warnings": [],
+  "index_version": "178af7a7517d"
+}

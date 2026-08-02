@@ -1,0 +1,841 @@
+# DESIGN RULE: this file is the ONLY place UI concerns (Streamlit widgets,
+# session_state, CSS) may live, and the ONLY place that owns I/O for the
+# web entry point -- the same role scripts/*.py play for the CLI. It calls
+# the SAME pure functions the CLI scripts call (run_extraction,
+# parse_declaration, resolve_items, classify, evaluate, find_substitutes,
+# find_horizon_signals) and adds no compliance logic of its own. Where a
+# small piece of pure JOINING code is unavoidable (matching a confirmed
+# category back onto the items it covers), it mirrors scripts/verdict.py's
+# own _build_item_category_map exactly, for the same reason that function
+# exists there: the join belongs at the I/O boundary, not inside
+# src/rules/engine.py, which must not know how a category was confirmed.
+#
+# THE PAUSE IS THE POINT: category recall@1 is measured at ~0.46 and the
+# category is outcome-determining (src/rules/engine.py), so this app never
+# computes a verdict from a retrieved-but-unconfirmed category. The flow is
+# a small state machine over st.session_state["stage"]:
+#
+#     input -> (extract, resolve, classify) -> category_confirm -> STOP
+#     category_confirm -> (evaluate, find_horizon_signals, find_substitutes) -> results
+#
+# Stage results are cached in st.session_state and never recomputed on a
+# Streamlit rerun -- extraction costs a real API call, and re-running it on
+# every widget interaction would be both slow and wrong. This state machine
+# is deliberately the same shape LangGraph's interrupt/resume would produce,
+# so the backend can be swapped later without the screens changing.
+"""Streamlit UI for the EU additive compliance checker.
+
+    uv run streamlit run app.py
+"""
+
+import html
+import json
+import tempfile
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+import streamlit as st
+
+from config import settings
+from src.category.classifier import build_queries, classify, item_component_labels
+from src.category.corpus import build_corpus
+from src.category.embedder import GeminiEmbedder
+from src.category.experiment import CONFIGS
+from src.category.schemas import CategoryCandidate, CategoryResult
+from src.extract.text_parser import parse_declaration
+from src.extractors.gemini import GeminiExtractor
+from src.horizon.lane import find_horizon_signals
+from src.horizon.load import load_horizon_meta, load_horizon_signals
+from src.horizon.schemas import HorizonResult
+from src.pipeline import run_extraction
+from src.report.email import EmailAttachment, SmtpConfig, send_report, test_connection
+from src.report.export import ReportIdentity, to_csv, to_json, to_pdf
+from src.report.narrator import Narration, narrate
+from src.resolve.resolver import References, resolve_items
+from src.resolve.schemas import ResolvedItem
+from src.rules.engine import evaluate
+from src.rules.schemas import ProductVerdict
+from src.schemas import GateResult
+from src.substitutes.advisor import find_substitutes
+from src.substitutes.schemas import SubstituteResult
+from src.ui import components
+from src.ui.styles import CUSTOM_CSS
+
+# MEASURED CHOICE, not a UI preference: CONFIGS["baseline"] never uses a
+# user-supplied product description at all (description_scope="none") --
+# see src/category/experiment.py. CONFIGS["best"] is the project's own
+# already-measured combination of the two wins from that ablation (product
+# queries get the description, component queries get their own name; see
+# docs/findings.md F-06 and experiment.py's comment on "best"). Since this
+# UI collects a description specifically to improve category matching, the
+# only config that honours that field at all is "best" -- using "baseline"
+# here would silently discard what the user typed.
+_CATEGORY_CONFIG = CONFIGS["best"]
+
+_REVIEW_HEADLINES = {"unresolved", "category_unknown"}
+_PERMITTING_HEADLINES = {"permitted_qs", "permitted_with_limit", "permitted_with_conditions"}
+
+
+@dataclass
+class ReferenceData:
+    eu_fip: list[dict]
+    codex_ins: list[dict]
+    resolver_refs: References
+    horizon_signals: list[dict]
+    horizon_meta: dict
+
+
+def _load_json(path: Path, default):
+    if not path.exists():
+        return default
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@st.cache_resource(show_spinner=False)
+def _load_references() -> ReferenceData:
+    eu_fip = _load_json(settings.REFERENCE_DIR / "eu_fip.json", [])
+    codex_ins = _load_json(settings.REFERENCE_DIR / "codex_ins.json", [])
+    functional_classes = _load_json(settings.REFERENCE_DIR / "functional_classes.json", [])
+    label_aliases = _load_json(settings.REFERENCE_DIR / "label_aliases.json", {})
+    horizon_path = settings.REFERENCE_DIR / "horizon_signals.json"
+    horizon_signals = load_horizon_signals(horizon_path) if horizon_path.exists() else []
+    horizon_meta = load_horizon_meta(horizon_path) if horizon_path.exists() else {}
+    return ReferenceData(
+        eu_fip=eu_fip,
+        codex_ins=codex_ins,
+        resolver_refs=References(
+            codex_ins=codex_ins,
+            functional_classes=functional_classes,
+            label_aliases=label_aliases,
+            eu_fip=eu_fip,
+            index_version="ui",
+        ),
+        horizon_signals=horizon_signals,
+        horizon_meta=horizon_meta,
+    )
+
+
+@st.cache_resource(show_spinner="Loading the food category index…")
+def _load_category_scorer():
+    """(categories, score_query) -- corpus built and embedded once per
+    server process. The embedder has its own disk cache
+    (data/reference/category_embeddings.json), so this costs a real API
+    call only the first time a given category has never been embedded."""
+    raw_categories = _load_json(settings.REFERENCE_DIR / "food_categories.json", [])
+    categories, documents, _flags = build_corpus(raw_categories, _CATEGORY_CONFIG)
+    embedder = GeminiEmbedder()
+    embeddings = embedder.embed_documents(documents)
+
+    def score_query(text: str) -> dict[str, float]:
+        from src.category.classifier import embedding_scores
+
+        return embedding_scores(embedder.embed_query(text), embeddings)
+
+    return categories, score_query
+
+
+@st.cache_resource(show_spinner=False)
+def _get_extractor() -> GeminiExtractor:
+    return GeminiExtractor(settings.PRIMARY_MODEL)
+
+
+def _save_upload(uploaded) -> Path:
+    suffix = Path(uploaded.name).suffix or ".jpg"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(uploaded.getvalue())
+    return Path(tmp.name)
+
+
+def _extraction_names(extraction_payload: dict) -> dict[int, str]:
+    """item_id -> a display name, falling back to verbatim -- for items
+    whose additive_name is null (unresolved/ambiguous items have no eu_fip
+    row to draw a name from). Same fallback scripts/verdict.py uses."""
+    items = extraction_payload["extraction"]["items"]
+    names = {}
+    for item in items:
+        name = item.get("name_as_declared") or item.get("verbatim")
+        if name:
+            names[item["item_id"]] = name
+    return names
+
+
+def _enrich_additive_names(
+    verdict: ProductVerdict,
+    extraction_names: dict[int, str],
+    canonical_ins_by_item: dict[int, str],
+    codex_names: dict[str, str],
+) -> ProductVerdict:
+    """A copy of `verdict` with every item's additive_name backfilled:
+
+        additive_name = eu_fip name (already set, kept as-is)
+                        else Codex INS name (e.g. INS 143 -> "Fast Green FCF",
+                             absent from eu_fip -- that absence is WHY it
+                             blocks, but Codex still knows the substance)
+                        else name_as_declared / verbatim (the label's own
+                             wording, via `extraction_names`)
+
+    additive_name is a pure display field -- nothing in src/rules/ or
+    src/substitutes/ branches on whether it is None (eu_fip presence is
+    signalled by eu_canonical_id/flags instead) -- so enriching it here,
+    ONCE, before find_substitutes()/narrate() ever see the verdict, fixes
+    every downstream surface (substitutes' blocked_name, the narrator's
+    JSON, every export, every screen) without changing any of their own
+    code: they already treat additive_name as their first-choice name.
+
+    An item resolved via the CODEX fallback tier gets its code folded into
+    the name itself -- "Fast Green FCF (INS 143)", not just "Fast Green
+    FCF" -- for the same reason: the code is how a user cross-references
+    their own specification, and ItemVerdict deliberately does not carry
+    canonical_ins (see src/substitutes/advisor.py's docstring), so this is
+    the one place with both the Codex name AND the code in hand at once.
+    An item WITH an eu_canonical_id already gets its E-number shown
+    separately (the verdict strip's own code_html) -- folding it into the
+    name too would duplicate it, so only the Codex-fallback tier does this.
+    """
+    items = []
+    for item in verdict.items:
+        name = item.additive_name
+        if not name:
+            canonical_ins = canonical_ins_by_item.get(item.item_id)
+            codex_name = codex_names.get(canonical_ins) if canonical_ins else None
+            if codex_name:
+                name = f"{codex_name} (INS {canonical_ins})"
+        if not name:
+            name = extraction_names.get(item.item_id)
+        if name and name != item.additive_name:
+            item = item.model_copy(update={"additive_name": name})
+        items.append(item)
+    return verdict.model_copy(update={"items": items})
+
+
+def _category_summary(verdict: ProductVerdict) -> str:
+    """"Product: 14.1.4 (Flavoured_drinks); Seasoning: 12.1.2 (Seasonings and
+    condiments)" -- the confirmed food category(ies), for the product
+    identity block. Category names are pulled from the verdict's own
+    CategoryVerdict rows (every one already carries category_name); this
+    never re-derives them from the food-category corpus."""
+    names: dict[str, str | None] = {}
+    for item in verdict.items:
+        for cv in item.by_category:
+            names.setdefault(cv.fcs_code, cv.category_name)
+
+    parts = []
+    for key, code in verdict.category_used.items():
+        label = "Product" if key == "(product)" else key
+        name = names.get(code)
+        parts.append(f"{label}: {code} ({name})" if name else f"{label}: {code}")
+    return "; ".join(parts) if parts else "not confirmed"
+
+
+def _code_sort_key(code: str) -> tuple:
+    parts = code.split(".")
+    return tuple(int(p) if p.isdigit() else p for p in parts)
+
+
+def _reset_session() -> None:
+    for key in (
+        "extraction",
+        "resolution",
+        "category_results",
+        "product_label",
+        "source_filename",
+        "run_timestamp",
+        "verdict",
+        "preview_verdict",
+        "horizon_result",
+        "substitute_result",
+        "narration",
+    ):
+        st.session_state.pop(key, None)
+    st.session_state.stage = "input"
+
+
+# =========================================================================== #
+# stage 1: input
+# =========================================================================== #
+def render_input() -> None:
+    st.markdown("## EU additive compliance screening")
+    st.markdown(
+        "<p class='eu-lede'>Check a food label's declared additives against EU Annex II food "
+        "additive regulations. Upload a label photo, or paste the ingredients declaration as "
+        "printed.</p>",
+        unsafe_allow_html=True,
+    )
+
+    tab_upload, tab_text = st.tabs(["Upload label", "Enter composition"])
+    description_help = (
+        "A short description (e.g. 'chocolate-coated wafer biscuit') improves food category "
+        "matching -- category retrieval alone selects the correct category first only about "
+        "half the time."
+    )
+
+    with tab_upload:
+        uploaded = st.file_uploader("Label photo", type=["png", "jpg", "jpeg"])
+        description_u = st.text_input(
+            "Product description (optional)", key="desc_upload", help=description_help
+        )
+        if st.button(
+            "Run screening", key="run_upload", type="primary", disabled=uploaded is None
+        ):
+            _run_pipeline_from_image(uploaded, description_u)
+
+    with tab_text:
+        text = st.text_area(
+            "Ingredients declaration",
+            height=160,
+            placeholder="Sugar, Wheat Flour, Palm Oil, Raising Agent (INS 500(ii)), Colour (INS 143), ...",
+            key="composition_text",
+        )
+        description_t = st.text_input(
+            "Product description (optional)", key="desc_text", help=description_help
+        )
+        if st.button(
+            "Run screening", key="run_text", type="primary", disabled=not text.strip()
+        ):
+            _run_pipeline_from_text(text, description_t)
+
+
+def _continue_pipeline(status, extraction_payload: dict, description: str, refs: ReferenceData) -> bool:
+    """Resolve then classify -- shared by both input paths. Returns False
+    (and leaves the page on "input") when there is nothing to check."""
+    items = extraction_payload["extraction"]["items"]
+    if not items:
+        status.update(label="Nothing to check", state="error")
+        st.error(extraction_payload.get("stop_reason") or "No items were extracted.")
+        return False
+
+    status.write("Resolving additive identities…")
+    resolution = resolve_items(items, refs.resolver_refs)
+    n_additive = sum(1 for r in resolution.items if r.classification == "additive")
+    status.write(f"{n_additive} additive(s) resolved of {len(items)} item(s)")
+
+    status.write("Retrieving candidate food categories…")
+    gate = extraction_payload["gate"]
+    queries = build_queries(
+        items,
+        resolution.items,
+        gate.get("product_name"),
+        gate.get("product_descriptor"),
+        _CATEGORY_CONFIG,
+        description or None,
+    )
+    categories, score_query = _load_category_scorer()
+
+    category_results: list[CategoryResult] = []
+    skipped = []
+    for query in queries:
+        if not query.text.strip():
+            skipped.append(query.component_label or "(product)")
+            continue
+        scores = score_query(query.text)
+        category_results.append(classify(query, scores, categories, refs.eu_fip, _CATEGORY_CONFIG))
+
+    status.write(f"{len(category_results)} categor{'y' if len(category_results) == 1 else 'ies'} to confirm")
+    if skipped:
+        status.write(f"Skipped, no query text: {', '.join(skipped)}")
+    status.update(label="Ready — confirm the food category next", state="complete")
+
+    st.session_state.extraction = extraction_payload
+    st.session_state.resolution = resolution
+    st.session_state.category_results = category_results
+    st.session_state.product_label = gate.get("product_name") or "Screening result"
+    st.session_state.stage = "category_confirm"
+    return True
+
+
+def _run_pipeline_from_image(uploaded, description: str) -> None:
+    refs = _load_references()
+    st.session_state.source_filename = uploaded.name
+    with st.status("Running screening…", expanded=True) as status:
+        status.write("Reading the label…")
+        image_path = _save_upload(uploaded)
+        try:
+            extraction_payload = run_extraction(image_path, _get_extractor(), crop=False)
+        finally:
+            image_path.unlink(missing_ok=True)
+
+        if extraction_payload["extraction"] is None:
+            status.update(label="Could not extract this label", state="error")
+            st.error(extraction_payload["stop_reason"])
+            return
+        status.write(f"{len(extraction_payload['extraction']['items'])} item(s) extracted")
+
+        if not _continue_pipeline(status, extraction_payload, description, refs):
+            return
+    st.rerun()
+
+
+def _run_pipeline_from_text(text: str, description: str) -> None:
+    refs = _load_references()
+    st.session_state.source_filename = None
+    with st.status("Running screening…", expanded=True) as status:
+        status.write("Parsing the ingredients declaration…")
+        extraction_result = parse_declaration(text)
+        # Text input bypasses the label-validity gate entirely -- say so
+        # plainly, the same wording scripts/extract_text.py uses. The
+        # user-typed description is threaded through _continue_pipeline as
+        # user_description, NOT written into product_descriptor here:
+        # product_descriptor is included in EVERY query regardless of scope
+        # (src/category/classifier.py's _build_query), while user_description
+        # is scoped to product-only under CONFIGS["best"] -- putting it here
+        # instead would leak it into every component query, the exact
+        # measured regression F-06 in docs/findings.md documents.
+        gate = GateResult(
+            is_food_label=True,
+            has_ingredients_declaration=True,
+            confidence=1.0,
+            evidence_found=["text_input"],
+            reject_reason=None,
+            product_name=None,
+            product_descriptor=None,
+            languages_detected=["en"],
+            language_selected="en",
+            ingredients_panel_bbox=None,
+            warnings=["input was pasted text, not a photographed label — no gate validation was performed"],
+        )
+        extraction_payload = {
+            "gate": gate.model_dump(),
+            "extraction": extraction_result.model_dump(),
+            "stop_reason": None,
+        }
+        status.write(f"{len(extraction_result.items)} item(s) parsed")
+        if extraction_result.unparsed_fragments:
+            st.warning(
+                f"{len(extraction_result.unparsed_fragments)} fragment(s) could not be parsed: "
+                + "; ".join(extraction_result.unparsed_fragments)
+            )
+
+        if not _continue_pipeline(status, extraction_payload, description, refs):
+            return
+    st.rerun()
+
+
+# =========================================================================== #
+# stage 2: category confirmation -- the pause
+# =========================================================================== #
+def _apply_category_confirmations(
+    category_results: list[CategoryResult],
+    choices: dict[str | None, CategoryCandidate],
+    resolved_items: list[ResolvedItem],
+    item_labels: dict[int, str | None],
+) -> tuple[dict[int, CategoryResult], frozenset[int]]:
+    """item_id -> the confirmed CategoryResult covering it, plus which item
+    ids were confirmed -- identical in shape and intent to
+    scripts/verdict.py's _build_item_category_map, duplicated here because
+    that function is CLI-script glue, not something src/ exports. `choices`
+    covers every query this app displayed for confirmation (unlike the
+    CLI's --category, which is a sparse partial override), so every result
+    is replaced.
+
+    `item_labels` (item_id -> component label, from
+    src.category.classifier.item_component_labels) is the join key -- NEVER
+    eu_canonical_id, which is not unique per declaration and collapses two
+    items sharing a substance id in different components onto whichever
+    component's result happened to be processed last."""
+    confirmed_labels: set[str | None] = set()
+    resolved_results = []
+    for result in category_results:
+        key = result.component_label if result.query.scope == "component" else None
+        if key in choices:
+            result = result.model_copy(update={"top3": [choices[key]]})
+            confirmed_labels.add(key)
+        resolved_results.append(result)
+
+    product_result = next((r for r in resolved_results if r.query.scope == "product"), None)
+    by_component_label: dict[str, CategoryResult] = {
+        result.component_label: result for result in resolved_results if result.query.scope == "component"
+    }
+
+    mapping: dict[int, CategoryResult] = {}
+    confirmed_item_ids: set[int] = set()
+    for item in resolved_items:
+        component_label = item_labels.get(item.item_id)
+        if component_label is not None and component_label in by_component_label:
+            chosen = by_component_label[component_label]
+        elif product_result is not None:
+            chosen = product_result
+        else:
+            continue
+        mapping[item.item_id] = chosen
+        key = chosen.component_label if chosen.query.scope == "component" else None
+        if key in confirmed_labels:
+            confirmed_item_ids.add(item.item_id)
+    return mapping, frozenset(confirmed_item_ids)
+
+
+def _finalise(choices: dict[str | None, CategoryCandidate]) -> None:
+    refs = _load_references()
+    resolved_items: list[ResolvedItem] = st.session_state.resolution.items
+    canonical_ins_by_item = {r.item_id: r.canonical_ins for r in resolved_items if r.canonical_ins}
+    codex_names = {row["ins"]: row["name"] for row in refs.codex_ins}
+    resolved_by_id = {r.item_id: r for r in resolved_items}
+    item_labels = item_component_labels(st.session_state.extraction["extraction"]["items"], resolved_by_id)
+
+    with st.spinner("Computing the verdict…"):
+        item_category_map, confirmed_item_ids = _apply_category_confirmations(
+            st.session_state.category_results, choices, resolved_items, item_labels
+        )
+        verdict = evaluate(resolved_items, item_category_map, refs.eu_fip, confirmed_item_ids)
+
+        # NAMES, section A: additive_name is null for anything absent from
+        # eu_fip (e.g. INS 143, blocked but never crosswalked), which reads
+        # downstream as "item 8" everywhere -- the blocking section, the
+        # substitutes' blocked_name, the narrator's JSON, every export.
+        # Backfilled ONCE here, before ANYTHING else consumes `verdict`, so
+        # every one of those surfaces is correct for free (they all already
+        # treat additive_name as their first-choice display name). See
+        # _enrich_additive_names.
+        extraction_names = _extraction_names(st.session_state.extraction)
+        verdict = _enrich_additive_names(verdict, extraction_names, canonical_ins_by_item, codex_names)
+
+        # DISPLAY ONLY -- the same pure evaluate() call, but against the
+        # ORIGINAL pre-confirmation candidates (an empty choices dict means
+        # nothing gets replaced). MEASURED PROBLEM this exists to fix: once
+        # a category is confirmed, `verdict` only ever carries a single
+        # candidate per item, so the verdict strip could never show why the
+        # confirmation choice mattered (e.g. Chipsmain's E551: permitted
+        # under the confirmed 12.2.2, not permitted under 15.1). This
+        # second verdict is NEVER used for blocking/summary/anything but
+        # merging its by_category lists back onto the display copy of each
+        # item in render_results() -- see _merge_preview_candidates. Its
+        # items are never separately name-enriched: _merge_preview_candidates
+        # bases every display dict on the (already-enriched) authoritative
+        # item, only borrowing by_category from this one.
+        preview_item_category_map, _unused = _apply_category_confirmations(
+            st.session_state.category_results, {}, resolved_items, item_labels
+        )
+        preview_verdict = evaluate(resolved_items, preview_item_category_map, refs.eu_fip, frozenset())
+
+        additive_ids = sorted({i.eu_canonical_id for i in verdict.items if i.eu_canonical_id})
+        additive_names = {
+            i.eu_canonical_id: i.additive_name for i in verdict.items if i.eu_canonical_id and i.additive_name
+        }
+        horizon_result = find_horizon_signals(
+            additive_ids,
+            refs.horizon_signals,
+            additive_names=additive_names,
+            data_retrieved=refs.horizon_meta.get("retrieved"),
+        )
+
+        horizon_flagged = frozenset(s.eu_canonical_id for s in horizon_result.signals)
+        substitute_result = find_substitutes(
+            verdict, refs.eu_fip, refs.codex_ins, canonical_ins_by_item, horizon_flagged
+        )
+
+    with st.spinner("Writing the narrative summary…"):
+        narration = narrate(verdict, substitute_result, horizon_result, settings.PRIMARY_MODEL)
+
+    st.session_state.verdict = verdict
+    st.session_state.preview_verdict = preview_verdict
+    st.session_state.horizon_result = horizon_result
+    st.session_state.substitute_result = substitute_result
+    st.session_state.narration = narration
+    st.session_state.run_timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    st.session_state.stage = "results"
+    st.rerun()
+
+
+def _merge_preview_candidates(authoritative: ProductVerdict, preview: ProductVerdict) -> dict[int, dict]:
+    """item_id -> a display dict for the verdict sections: the authoritative
+    (confirmed) ItemVerdict's own fields, but with by_category REPLACED by
+    the union of the confirmed candidate and every PRE-confirmation
+    candidate for that item, plus a "confirmed_fcs_code" key naming which
+    one was actually chosen. src/ui/components.py's verdict_strip_html
+    renders every candidate here, full colour and outlined for the
+    confirmed one, dimmed for the rest. Purely a display merge over two
+    verdicts evaluate() already computed -- never changes which section an
+    item belongs to or any compliance decision."""
+    preview_by_id = {item.item_id: item for item in preview.items}
+    display: dict[int, dict] = {}
+    for item in authoritative.items:
+        data = item.model_dump()
+        confirmed_code = None
+        if item.by_category and "category_confirmed_by_user" in item.flags:
+            confirmed_code = item.by_category[0].fcs_code
+
+        preview_item = preview_by_id.get(item.item_id)
+        combined = list(preview_item.by_category) if preview_item else []
+        seen_codes = {cv.fcs_code for cv in combined}
+        for cv in item.by_category:
+            if cv.fcs_code not in seen_codes:
+                combined.append(cv)
+                seen_codes.add(cv.fcs_code)
+
+        data["by_category"] = [cv.model_dump() for cv in combined]
+        data["confirmed_fcs_code"] = confirmed_code
+        display[item.item_id] = data
+    return display
+
+
+def render_category_confirmation() -> None:
+    if st.button("← Back", key="back_to_input"):
+        # Returns to the input screen WITHOUT clearing extraction/resolution/
+        # category_results -- nothing here re-runs extraction; this is a
+        # pure stage change, not a reset. "New screening" (_reset_session)
+        # is the button that discards them.
+        st.session_state.stage = "input"
+        st.rerun()
+
+    st.markdown("### Confirm the food category")
+    st.markdown(
+        "<p class='eu-lede'>Automatic category matching selects the correct category first "
+        "only about half the time (measured recall@1 ≈ 46%), and the food category determines "
+        "the verdict. Confirm each one below before the compliance verdict is computed.</p>",
+        unsafe_allow_html=True,
+    )
+
+    category_results: list[CategoryResult] = st.session_state.category_results
+    categories, _score_query = _load_category_scorer()
+    all_options = ["(keep the selection above)"] + [
+        f"{code} — {categories[code].name}" for code in sorted(categories, key=_code_sort_key)
+    ]
+
+    choices: dict[str | None, CategoryCandidate] = {}
+    for i, result in enumerate(category_results):
+        label = result.component_label or "Whole product"
+        st.markdown(f"#### {label}")
+        st.caption(f"Query: {result.query.text}")
+
+        radio_options = [
+            f"{c.code} — {c.name}  (score {c.similarity:.2f})" for c in result.top3
+        ]
+        chosen_label = st.radio(
+            "Top match", radio_options, index=0, key=f"cat_radio_{i}", label_visibility="collapsed"
+        )
+        chosen = result.top3[radio_options.index(chosen_label)]
+
+        with st.expander("Choose another category"):
+            override_label = st.selectbox(
+                "Search all food categories", all_options, key=f"cat_override_{i}"
+            )
+            if override_label != all_options[0]:
+                code = override_label.split(" — ", 1)[0]
+                chosen = CategoryCandidate(code=code, name=categories[code].name, similarity=1.0, permitted=True)
+
+        key = result.component_label if result.query.scope == "component" else None
+        choices[key] = chosen
+        st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
+
+    if st.button("Confirm and continue", type="primary"):
+        _finalise(choices)
+
+
+# =========================================================================== #
+# stage 3: results -- verdict, substitutes, horizon, review queue
+# =========================================================================== #
+def _build_identity(verdict: ProductVerdict) -> ReportIdentity:
+    """The product identity block -- constructed ONCE, then shown on the
+    results screen AND handed to to_csv/to_pdf unchanged, so the screen,
+    the CSV and the PDF header all say the SAME thing (section B)."""
+    gate = st.session_state.extraction["gate"]
+    source_filename = st.session_state.get("source_filename")
+    product_name = (
+        gate.get("product_name") or source_filename or st.session_state.get("product_label") or "Screening result"
+    )
+    return ReportIdentity(
+        product_name=product_name,
+        source=source_filename or "pasted text",
+        category=_category_summary(verdict),
+        timestamp=st.session_state.get("run_timestamp") or "",
+    )
+
+
+def render_results() -> None:
+    verdict: ProductVerdict = st.session_state.verdict
+    preview_verdict: ProductVerdict = st.session_state.preview_verdict
+    substitute_result: SubstituteResult = st.session_state.substitute_result
+    horizon_result: HorizonResult = st.session_state.horizon_result
+    narration: Narration = st.session_state.narration
+    names = _extraction_names(st.session_state.extraction)
+    identity = _build_identity(verdict)
+
+    st.markdown(f"## {html.escape(identity.product_name)}")
+    st.markdown(
+        "<div class='eu-identity'>"
+        f"<span class='eu-identity-item'><strong>Source:</strong> {html.escape(identity.source)}</span>"
+        f"<span class='eu-identity-item'><strong>Category:</strong> {html.escape(identity.category)}</span>"
+        f"<span class='eu-identity-item'><strong>Run:</strong> {html.escape(identity.timestamp)}</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Navigation, below the title (not flush against it) -- Back returns to
+    # category confirmation so a DIFFERENT category can be chosen and the
+    # verdict recomputed; that recompute is cheap (no API call, unlike
+    # narration, which does cost one when re-confirmed). New screening
+    # discards everything and starts over.
+    st.markdown("<div class='eu-nav-row'></div>", unsafe_allow_html=True)
+    col_back, col_new = st.columns([1, 1])
+    with col_back:
+        if st.button("← Back to category confirmation"):
+            st.session_state.stage = "category_confirm"
+            st.rerun()
+    with col_new:
+        if st.button("New screening"):
+            _reset_session()
+            st.rerun()
+
+    # The narration -- prominent, above the item sections. Rendered via
+    # plain st.markdown (Streamlit's own markdown parser, safe by default,
+    # no unsafe_allow_html). It does not replace verdict.summary below it:
+    # that deterministic text (src/rules/engine.py's own words) is still
+    # shown verbatim, per the rule that it is never rewritten.
+    st.markdown(narration.summary)
+    # narration.detail is topic -> list of short sentences (a JSON object,
+    # not a markdown string -- see src/report/narrator.py's Narration
+    # schema for the bug this fixes: a flat string field silently rendered
+    # a stringified Python dict when the model returned one anyway). Each
+    # topic gets its own bold sub-heading and its points as bullets.
+    for topic, points in narration.detail.items():
+        st.markdown(f"**{topic}**")
+        for point in points:
+            st.markdown(f"- {point}")
+    st.caption(f"Written by {narration.model_id} from the assessment above. It adds no facts.")
+    if narration.unfaithful_claims:
+        st.warning(
+            "The narration above contains claims NOT found in the underlying assessment: "
+            + "; ".join(narration.unfaithful_claims)
+        )
+
+    st.markdown(f"<p class='eu-summary'>{verdict.summary}</p>", unsafe_allow_html=True)
+
+    item_dicts = [item.model_dump() for item in verdict.items]
+    out_of_scope_items = [d for d in item_dicts if d["headline"] == "out_of_scope"]
+    review_items = [d for d in item_dicts if d["headline"] in _REVIEW_HEADLINES]
+    display_items = _merge_preview_candidates(verdict, preview_verdict)
+    blocking_items = [display_items[i] for i in verdict.blocking]
+    conflict_items = [display_items[i] for i in verdict.category_conflict]
+    permitted_items = [
+        display_items[item.item_id]
+        for item in verdict.items
+        if item.headline in _PERMITTING_HEADLINES
+        and item.item_id not in verdict.blocking
+        and item.item_id not in verdict.category_conflict
+    ]
+
+    # Orientation before detail -- the counts are the point; whether a
+    # reader clicks through the sections below is their choice. Four
+    # MUTUALLY EXCLUSIVE counts (see components.count_buckets), unlike the
+    # section lists above where a permitted_with_conditions item can
+    # legitimately appear in more than one place (e.g. verdict.blocking vs.
+    # verdict.category_conflict) -- the strip must never double-count.
+    components.render_count_strip(components.count_buckets(item_dicts))
+
+    components.render_verdict_section("Blocking", blocking_items, names, is_blocking=True)
+    components.render_verdict_section("Category-dependent", conflict_items, names)
+    components.render_verdict_section("Permitted", permitted_items, names)
+
+    components.render_substitutes(substitute_result.model_dump())
+    components.render_horizon(horizon_result.model_dump())
+
+    components.render_review_queue(review_items, names)
+    components.render_out_of_scope(out_of_scope_items, names)
+
+    render_export_section(verdict, substitute_result, horizon_result, narration, identity)
+
+
+def render_export_section(
+    verdict: ProductVerdict,
+    substitutes: SubstituteResult,
+    horizon: HorizonResult,
+    narration: Narration,
+    identity: ReportIdentity,
+) -> None:
+    """Three download buttons (JSON/CSV/PDF) and an opt-in email section.
+    Every export carries the same caveats the screen above does -- see
+    src/report/export.py's module docstring."""
+    st.markdown("<div class='eu-section-title'>Export and share</div>", unsafe_allow_html=True)
+
+    stem = "".join(c if c.isalnum() else "_" for c in identity.product_name).strip("_") or "report"
+
+    json_text = to_json(verdict, substitutes, horizon, narration)
+    csv_text = to_csv(verdict, identity)
+    pdf_bytes = to_pdf(verdict, substitutes, horizon, narration, identity)
+
+    col_json, col_csv, col_pdf = st.columns(3)
+    with col_json:
+        st.download_button(
+            "Download JSON", json_text.encode("utf-8"), file_name=f"{stem}.json", mime="application/json"
+        )
+    with col_csv:
+        st.download_button("Download CSV", csv_text.encode("utf-8"), file_name=f"{stem}.csv", mime="text/csv")
+    with col_pdf:
+        st.download_button("Download PDF", pdf_bytes, file_name=f"{stem}.pdf", mime="application/pdf")
+
+    with st.expander("Email this report", expanded=False):
+        st.caption(
+            "Credentials below are used only for this send and are held in this browser session "
+            "only -- never written to disk."
+        )
+
+        # SECTION H: fields default to whatever .env provides (possibly
+        # nothing), but are otherwise plain session_state -- editable here,
+        # never persisted. st.session_state.setdefault(...) BEFORE each
+        # widget, then the widget uses ONLY key= (no value=), which is the
+        # correct Streamlit pattern for a widget-owned, pre-seeded value.
+        st.session_state.setdefault("smtp_host", settings.SMTP_HOST or "")
+        st.session_state.setdefault("smtp_port", settings.SMTP_PORT or 587)
+        st.session_state.setdefault("smtp_user", settings.SMTP_USER or "")
+        st.session_state.setdefault("smtp_password", settings.SMTP_PASSWORD or "")
+        st.session_state.setdefault("smtp_from", settings.SMTP_FROM or "")
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            host = st.text_input("SMTP host", key="smtp_host")
+            user = st.text_input("Username", key="smtp_user")
+            sender = st.text_input("From address", key="smtp_from")
+        with col_b:
+            port = st.number_input("Port", key="smtp_port", min_value=1, max_value=65535, step=1)
+            password = st.text_input("Password", key="smtp_password", type="password")
+
+        smtp_config = None
+        if host.strip() and user.strip() and password and sender.strip():
+            smtp_config = SmtpConfig(
+                host=host.strip(), port=int(port), user=user.strip(), password=password, sender=sender.strip()
+            )
+
+        if st.button("Send test email", key="smtp_test", disabled=smtp_config is None):
+            try:
+                test_connection(smtp_config)
+                st.success("Connection succeeded.")
+            except Exception as exc:  # noqa: BLE001 -- any connection failure must surface to the user
+                st.error(f"Connection failed: {exc}")
+
+        recipient = st.text_input("Recipient email address", key="email_recipient")
+        st.caption("Sending transmits the PDF report above to the address entered here. Nobody else.")
+        if st.button("Send", key="send_email", disabled=smtp_config is None or not recipient.strip()):
+            try:
+                send_report(
+                    smtp_config,
+                    recipient.strip(),
+                    subject=f"EU additive compliance report -- {identity.product_name}",
+                    body=f"{narration.summary}\n\nThe full report is attached as a PDF.",
+                    attachment=EmailAttachment(
+                        filename=f"{stem}.pdf", content=pdf_bytes, mime_type="application/pdf"
+                    ),
+                )
+                st.success(f"Sent to {recipient.strip()}.")
+            except Exception as exc:  # noqa: BLE001 -- any SMTP failure must surface to the user, not crash the app
+                st.error(f"Could not send the report: {exc}")
+
+
+# =========================================================================== #
+# entry point
+# =========================================================================== #
+def main() -> None:
+    st.set_page_config(page_title="EU Additive Compliance", layout="centered")
+    st.markdown(f"<style>{CUSTOM_CSS}</style>", unsafe_allow_html=True)
+    st.session_state.setdefault("stage", "input")
+
+    stage = st.session_state.stage
+    if stage == "category_confirm":
+        render_category_confirmation()
+    elif stage == "results":
+        render_results()
+    else:
+        render_input()
+
+
+if __name__ == "__main__":
+    main()

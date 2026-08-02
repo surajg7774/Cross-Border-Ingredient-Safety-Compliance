@@ -1,0 +1,40 @@
+{
+  "items": [
+    {
+      "item_id": 0,
+      "canonical_ins": "143",
+      "eu_canonical_id": null,
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Colour"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [
+        "not_in_eu_list"
+      ],
+      "candidates": [],
+      "matched_on": "143"
+    },
+    {
+      "item_id": 1,
+      "canonical_ins": "330",
+      "eu_canonical_id": "330",
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Acidity regulator",
+        "Antioxidant",
+        "Colour-retention agent"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "330"
+    }
+  ],
+  "warnings": [],
+  "index_version": "178af7a7517d"
+}
