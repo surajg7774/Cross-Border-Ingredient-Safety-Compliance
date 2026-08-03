@@ -1,0 +1,104 @@
+{
+  "label": "Parle-Gmain",
+  "pin_status": "REVIEWED against verdict_truth_draft.md and eu_fip evidence -- see docs/findings.md for the full cross-check (which pins changed from rank-1 and why). Any pin NOT listed as changed there is confirmed unchanged from the scaffolder's rank-1 provisional value, also reviewed.",
+  "pinned_categories": {
+    "INVERT SUGAR SYRUP": {
+      "code": "11.2",
+      "name": "Other sugars and syrups"
+    },
+    "(product)": {
+      "code": "7.2",
+      "name": "Fine bakery wares"
+    }
+  },
+  "items": [
+    {
+      "item_id": 0,
+      "verbatim": "REFINED WHEAT FLOUR (MAIDA ) (68%)",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 1,
+      "verbatim": "SUGAR",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 2,
+      "verbatim": "REFINED PALM OIL",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 3,
+      "verbatim": "INVERT SUGAR SYRUP# [SUGAR, CITRIC ACID]",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    },
+    {
+      "item_id": 4,
+      "verbatim": "SUGAR",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 5,
+      "verbatim": "CITRIC ACID",
+      "headline": "permitted_with_conditions",
+      "eu_canonical_id": "330",
+      "blocked": false
+    },
+    {
+      "item_id": 6,
+      "verbatim": "IODISED SALT",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 7,
+      "verbatim": "503 ( ii )",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    },
+    {
+      "item_id": 8,
+      "verbatim": "500 (ii)",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    },
+    {
+      "item_id": 9,
+      "verbatim": "MILK SOLIDS",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 10,
+      "verbatim": "1101 ( ii )",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 11,
+      "verbatim": "472e",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    }
+  ],
+  "truth_disclosure": {
+    "review_status": "AI-DRAFTED, CROSS-CHECKED AGAINST eu_fip.json, NOT VERIFIED BY A REGULATORY EXPERT",
+    "note": "Filled values originated as an independent AI reading of the label image (verdict_truth_draft.md, written without looking at pipeline output), then cross-checked item-by-item against the actual eu_fip rows for the pinned category. Only items where the draft marked HIGH confidence AND the eu_fip rows agreed with its claim were filled -- MED-confidence agreements, UNSET/declined items, and items the draft never addressed are left UNSET on purpose. Do not treat this as validated ground truth; correct by hand against the actual Annex II text before relying on it as a regression baseline, same discipline data/golden/category_truth.json's own _meta carries."
+  }
+}

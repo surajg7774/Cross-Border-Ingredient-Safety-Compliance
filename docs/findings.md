@@ -3,9 +3,9 @@ build, not renumbered afterward -- some numbers below are absent (F-01,
 F-08, F-15) because those findings were merged into another entry or
 withdrawn before being written up, not because this file is incomplete.
 F-06 was briefly a duplicate (two unrelated findings shared the number);
-the second was renumbered to F-07, the first unused ID, once noticed. 15
+the second was renumbered to F-07, the first unused ID, once noticed. 16
 findings are recorded here: F-02 through F-07, F-09 through F-14, and F-16
-through F-18.
+through F-19.
 
 ### Current operating config
 
@@ -338,3 +338,61 @@ deliberately, not abandoned -- revisit only with a concrete reason to
 change the underlying provider, and re-verify the signature-handling
 story against whichever `langchain-google-genai` version is current at
 that time, not against this finding's version (`4.3.2`).
+
+## F-19 — verdict golden set: draft cross-checked against eu_fip, 43/78 items filled
+
+`verdict_truth_draft.md` (repo root) is an independent AI reading of the five
+`data/golden/verdict/` label images -- written without looking at pipeline
+output, explicitly not verified against Annex II. Cross-checked line-by-line
+against the actual eu_fip rows before filling anything in.
+
+**Pins: 4 of 10 changed from the scaffolder's rank-1 provisional value.**
+Parle-Gmain product `15`->`7.2` (eu_fip: E503/E500(ii)/E472e return zero rows
+at `15`, clean Group-I matches at `7.2` -- the same retrieval-miss shape
+`src/rules/engine.py`'s own docstring already names). Chipsmain product
+`2.3`->`15.1` (no scoring impact, no additive sits at product scope here, but
+`2.3` "Vegetable oil pan spray" is a wrong match for a bag of chips).
+EU_productmain "SEASONING" `12.3`->`12.2.2` (no scoring impact -- Group I
+matches cleanly at both -- but `12.2.2` is the conceptually correct bracket,
+matching Chipsmain's identical treatment). Ice-creammain "Outer Layer"
+`3`->`5.1` (the outer layer is an explicit chocolate coating, not the ice
+cream matrix -- and this one DOES change a scored value: E322 soya lecithin
+is `permitted_with_conditions` at `3` but `permitted_qs` at `5.1`, a single
+row with no conditions text).
+
+**Cross-check outcome, all 78 items across 5 labels:**
+- 43 AGREES at HIGH confidence -> filled.
+- 12 UNSET (draft declined; eu_fip rows were in fact determinable in most
+  cases, but the draft's own discipline was respected -- left UNSET, not
+  filled from what the rows show).
+- 6 DISAGREES, all the same shape: draft assumed a plain food-ingredient
+  resolution (e.g. "Milk and Milk Solids", "Spices and Condiments",
+  "Hazelnut Pieces/Paste"), but the actual resolver returned
+  `unknown`/`ambiguous` for these -- correct expected headline is
+  `unresolved`, not `out_of_scope`, since the golden set scores what the
+  engine should do GIVEN the actual (already-fixed) resolution output, not
+  a hypothetical perfect one. Left UNSET (DISAGREES items are never filled).
+- 8 MISSED: 6 container/compound nodes (e.g. "Seasoning", "Outer Layer")
+  never given their own row, plus 2 duplicate-named product-level items
+  (EU_productmain's second "Corn maltodextrin" and second "Salt") the
+  draft's single row didn't distinguish -- the exact multi-occurrence
+  pitfall the draft itself warned about for Ice-creammain's maltitol,
+  just missed for its own case.
+- 1 real extraction gap found in the process, not a golden-authoring
+  matter: Khusmain's `declaration_verbatim` literally starts "Sugar,
+  Water, Citric Acid…" but no `item` was ever extracted for "Sugar" --
+  confirmed by reading the raw extraction output, not itemized in the
+  golden set since there is no item_id to attach it to.
+
+Every filled item's `headline`/`eu_canonical_id`/`blocked` was derived from
+the actual eu_fip row(s) at the (now-corrected) pin via
+`src.rules.row_selection.select_row` -- e.g. a generic draft "permitted"
+claim was resolved to the precise `permitted_with_conditions` /
+`permitted_qs` / `permitted_with_limit` enum the row objectively supports,
+never asserted beyond what the draft itself claimed HIGH confidence in.
+
+Each golden file now carries a `truth_disclosure` header (`review_status`,
+`note`) matching `data/golden/category_truth.json`'s own `_meta` disclosure
+pattern -- AI-drafted, cross-checked against eu_fip, NOT verified by a
+regulatory expert. Do not treat the 43 filled values as validated ground
+truth without independent Annex II review.

@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     CATEGORY_TRUTH_PATH: Path = Path("data/golden/category_truth.json")
     EXPERIMENTS_CSV: Path = OUTPUT_DIR / "experiments.csv"
     VERDICT_OUTPUT_DIR: Path = OUTPUT_DIR / "verdict"
+    VERDICT_GOLDEN_DIR: Path = Path("data/golden/verdict")
     SUBSTITUTES_OUTPUT_DIR: Path = OUTPUT_DIR / "substitutes"
     HORIZON_OUTPUT_DIR: Path = OUTPUT_DIR / "horizon"
     AGENT_OUTPUT_DIR: Path = OUTPUT_DIR / "agent"
