@@ -1426,9 +1426,23 @@ def render_results() -> None:
     # narrate() fell back to verdict.summary.
     components.render_verdict_caveats(item_dicts)
 
-    components.render_verdict_section("Blocking", blocking_items, names, is_blocking=True)
-    components.render_verdict_section("Category-dependent", conflict_items, names)
-    components.render_permitted_section("Permitted", permitted_items, names)
+    # Any Group clause (Group I, Group II, ...) shared by more than one
+    # item's primary candidate renders ONCE here, before any section, and
+    # every item that carries it -- Blocking, Category-dependent, or
+    # Permitted alike -- links back to it instead of repeating it (see
+    # components.render_group_conditions_block for the measurement and the
+    # merged-clause case it deliberately leaves untouched).
+    group_registry = components.render_group_conditions_block(
+        blocking_items + conflict_items + permitted_items
+    )
+
+    components.render_verdict_section(
+        "Blocking", blocking_items, names, is_blocking=True, group_registry=group_registry
+    )
+    components.render_verdict_section(
+        "Category-dependent", conflict_items, names, group_registry=group_registry
+    )
+    components.render_permitted_section("Permitted", permitted_items, names, group_registry=group_registry)
 
     components.render_substitutes(substitute_result.model_dump())
     components.render_horizon(horizon_result.model_dump())

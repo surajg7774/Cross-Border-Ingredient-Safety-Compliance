@@ -100,6 +100,37 @@ _SUBSTITUTE_FLAG_LABELS: dict[str, str] = {
 _GROUP_CONDITIONS_RE = re.compile(r"^(?:\d+\)\s*)?Permitted via (Group [IVX]+(?:,\s*[A-Za-z]+)?)")
 _PERIOD_OF_APPLICATION_RE = re.compile(r"period of application", re.IGNORECASE)
 
+# src/rules/row_selection.py's merge_conditions numbers EVERY clause
+# ("1) ...\n\n2) ...") only when 2+ DISTINCT co-applicable rows are merged;
+# a single clause, merged or not, is never numbered. A second numbered
+# clause after a paragraph break therefore means this conditions string
+# carries more than the Group permission alone (MEASURED, real examples in
+# data/outputs/verdict/: GraphTestChips.json's E627/E631 are "1) Permitted
+# via Group I...\n\n2) Permitted via Ribonucleotides" -- collapsing that to
+# a bare Group I reference would silently drop the Ribonucleotides clause).
+_MERGED_CLAUSE_MARKER_RE = re.compile(r"\n\s*\n\s*\d+\)\s")
+
+
+def _normalize_conditions(conditions: str) -> str:
+    """Whitespace/punctuation-insensitive identity for a conditions string.
+    MEASURED against data/reference/eu_fip.json: the dominant Group I
+    clause alone (9,051 of 18,987 rows, 47.7% of Annex II) is stored in
+    three literal forms -- wrapped with a mid-sentence newline, collapsed
+    to one line, and with/without a trailing period. Without this, the
+    "same" clause is treated as three different ones."""
+    return re.sub(r"\s+", " ", conditions).strip().rstrip(".").strip()
+
+
+def _pure_group_match(conditions: str) -> re.Match | None:
+    """Whether `conditions` is EXCLUSIVELY a Group clause, as opposed to a
+    merged multi-clause string where Group is only one co-applicable
+    clause among several -- see _MERGED_CLAUSE_MARKER_RE. Only a pure
+    match is safe to collapse to a shared-block reference without dropping
+    a clause a per-item render would otherwise have shown."""
+    if _MERGED_CLAUSE_MARKER_RE.search(conditions):
+        return None
+    return _GROUP_CONDITIONS_RE.match(_normalize_conditions(conditions))
+
 # food_categories.json's refDataFoodCategoryEN names carry the legal
 # citation inline ("Cocoa and chocolate products as covered by Directive
 # 2000/36/EC"), not as a separate field -- 25 of 154 categories MEASURED to
@@ -427,13 +458,99 @@ def render_verdict_caveats(items: list[dict]) -> None:
         st.caption(caveat)
 
 
-def _render_citation_and_conditions(top: dict | None, flags: list[str]) -> None:
+def _render_conditions_body(conditions: str, note_codes: list[str] | None) -> None:
+    """The conditions text itself, once the citation/date above it are
+    handled by the caller: one caption line per applicable note, first
+    line inline, the rest (if any) behind an expander. Shared by
+    _render_citation_and_conditions (one item's own conditions) and
+    render_group_conditions_block (a Group clause's shared block) so the
+    "first line inline, rest in an expander" presentation only has to be
+    right in one place."""
+    for note in _conditions_notes(conditions):
+        st.markdown(f"<p class='eu-caption'>{_esc(note)}</p>", unsafe_allow_html=True)
+
+    first_line, _, rest = conditions.partition("\n")
+    st.markdown(f"<p class='eu-caption'>{_esc(first_line)}</p>", unsafe_allow_html=True)
+    rest = rest.strip()
+    if rest or note_codes:
+        with st.expander("Conditions of use"):
+            if rest:
+                st.write(rest)
+            if note_codes:
+                st.caption("Note codes: " + ", ".join(note_codes))
+
+
+def _group_conditions_map(items: list[dict]) -> dict[str, dict]:
+    """Normalized Group-clause conditions text -> one representative
+    candidate dict carrying that exact text (the first one seen, in item
+    order). Pure and Streamlit-free so it is unit-testable on its own.
+    Only PURE Group clauses are included (see _pure_group_match) -- a
+    merged conditions string where Group is one of several co-applicable
+    clauses is deliberately excluded, so it keeps rendering in full,
+    per item, and never loses a clause a per-item render would have
+    shown."""
+    reps: dict[str, dict] = {}
+    for item in items:
+        top = _primary_candidate(item)
+        conditions = (top or {}).get("conditions")
+        if not conditions or not _pure_group_match(conditions):
+            continue
+        reps.setdefault(_normalize_conditions(conditions), top)
+    return reps
+
+
+def render_group_conditions_block(items: list[dict]) -> dict[str, str]:
+    """Renders every DISTINCT Group clause (Group I, Group II, ...) found
+    across every item passed in -- Blocking, Category-dependent, and
+    Permitted alike, since a Category-dependent item's confirmed candidate
+    can carry the identical text a Permitted item's does, not just a
+    Permitted one -- exactly once, before any section renders. Returns
+    normalized-text -> anchor-id so render_verdict_section and
+    render_permitted_section can replace every occurrence of that text
+    with a short in-page link back here (`<a href="#anchor-id">`) instead
+    of repeating the clause verbatim per additive (MEASURED: one clause
+    alone covers 9,051 of 18,987 eu_fip rows, 47.7% of Annex II). Renders
+    nothing, and returns {}, if no item's conditions is a pure Group
+    clause -- callers can call this unconditionally."""
+    reps = _group_conditions_map(items)
+    if not reps:
+        return {}
+
+    registry = {normalized: f"group-conditions-{i + 1}" for i, normalized in enumerate(reps)}
+
+    st.markdown("<div class='eu-section-title'>Group conditions</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<p class='eu-caption'>The blocks below are set once, in EU law, for an entire Group of "
+        "additives -- shown once here; each additive that carries one links back to it instead of "
+        "repeating it.</p>",
+        unsafe_allow_html=True,
+    )
+    for normalized, top in reps.items():
+        st.markdown(f"<div id='{registry[normalized]}'></div>", unsafe_allow_html=True)
+        _render_conditions_body(top["conditions"], top.get("note_codes"))
+        st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
+
+    return registry
+
+
+def _render_citation_and_conditions(
+    top: dict | None, flags: list[str], group_registry: dict[str, str] | None = None
+) -> None:
     """The citation (a real link, or an explicit "no source URL" note --
     never silence), the in-force date, and the conditions -- first line
     inline, the rest behind an expander labelled what it is. Shared by
     render_verdict_row (one additive) and _render_permitted_group (several
     additives that share this exact block) -- so a citation or a numbered-
-    conditions fix only has to happen once."""
+    conditions fix only has to happen once.
+
+    When `top`'s conditions is a PURE Group clause already rendered once
+    by render_group_conditions_block (its anchor id is in group_registry,
+    keyed by normalized text), the full text is replaced by a short link
+    back to that shared block instead of repeating it here -- an
+    unambiguous jump target for a reader who lands mid-page, not just
+    prose saying "above". Anything else (no match, or a merged string
+    where Group is only one of several clauses) renders exactly as
+    before."""
     if top is not None:
         # Every source_url becomes a real link; a null one says so
         # explicitly instead of silently rendering nothing -- this is the
@@ -465,28 +582,27 @@ def _render_citation_and_conditions(top: dict | None, flags: list[str]) -> None:
         )
 
     if top and top.get("conditions"):
-        # One line above the block for each applicable note (Group
-        # boilerplate, a transition date buried in the prose) -- BEFORE the
-        # conditions text itself, so a reader knows what they are about to
-        # read before they read it.
-        for note in _conditions_notes(top["conditions"]):
-            st.markdown(f"<p class='eu-caption'>{_esc(note)}</p>", unsafe_allow_html=True)
-
-        # First line inline -- "Conditions — 14.1.4" said nothing about the
-        # contents; a reader had to open the expander just to see if there
-        # was anything worth reading. The rest (if any) stays collapsed.
-        first_line, _, rest = top["conditions"].partition("\n")
-        st.markdown(f"<p class='eu-caption'>{_esc(first_line)}</p>", unsafe_allow_html=True)
-        rest = rest.strip()
-        if rest or top.get("note_codes"):
-            with st.expander("Conditions of use"):
-                if rest:
-                    st.write(rest)
-                if top.get("note_codes"):
-                    st.caption("Note codes: " + ", ".join(top["note_codes"]))
+        conditions = top["conditions"]
+        anchor = (group_registry or {}).get(_normalize_conditions(conditions))
+        if anchor:
+            group_match = _pure_group_match(conditions)
+            group_name = group_match.group(1) if group_match else "Group"
+            st.markdown(
+                f"<p class='eu-caption'>Permitted via {_esc(group_name)} — see the "
+                f"<a href='#{anchor}'>{_esc(group_name)} conditions above</a>.</p>",
+                unsafe_allow_html=True,
+            )
+        else:
+            _render_conditions_body(conditions, top.get("note_codes"))
 
 
-def render_verdict_row(item: dict, names: dict[int, str] | None = None, *, is_blocking: bool = False) -> None:
+def render_verdict_row(
+    item: dict,
+    names: dict[int, str] | None = None,
+    *,
+    is_blocking: bool = False,
+    group_registry: dict[str, str] | None = None,
+) -> None:
     """One additive's full row: the verdict strip, WHY it blocks (blocking
     section only), its citation, in-force date, and conditions."""
     display_name = _display_name(item, names)
@@ -495,22 +611,32 @@ def render_verdict_row(item: dict, names: dict[int, str] | None = None, *, is_bl
     if is_blocking:
         st.markdown(f"<p class='eu-caption'>{_esc(_blocking_reason(item))}</p>", unsafe_allow_html=True)
 
-    _render_citation_and_conditions(_primary_candidate(item), item.get("flags") or [])
+    _render_citation_and_conditions(_primary_candidate(item), item.get("flags") or [], group_registry)
     st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
 
 
 def render_verdict_section(
-    title: str, items: list[dict], names: dict[int, str] | None = None, *, is_blocking: bool = False
+    title: str,
+    items: list[dict],
+    names: dict[int, str] | None = None,
+    *,
+    is_blocking: bool = False,
+    group_registry: dict[str, str] | None = None,
 ) -> None:
     """A titled group of verdict rows -- BLOCKING or CATEGORY-DEPENDENT.
     Renders nothing when `items` is empty, so callers can invoke every
     section unconditionally. PERMITTED items go through
-    render_permitted_section instead (see its docstring for why)."""
+    render_permitted_section instead (see its docstring for why).
+    `group_registry` (see render_group_conditions_block) is only ever
+    passed for Category-dependent items in practice -- a Blocking item's
+    primary candidate is itself the blocking verdict, never a Group
+    permission -- but it is honoured here regardless, since nothing about
+    this function's own logic depends on that being true."""
     if not items:
         return
     st.markdown(f"<div class='eu-section-title'>{_esc(title)} ({len(items)})</div>", unsafe_allow_html=True)
     for item in items:
-        render_verdict_row(item, names, is_blocking=is_blocking)
+        render_verdict_row(item, names, is_blocking=is_blocking, group_registry=group_registry)
 
 
 def _permitted_group_key(item: dict) -> tuple:
@@ -538,7 +664,9 @@ def _permitted_group_key(item: dict) -> tuple:
     )
 
 
-def _render_permitted_group(group: list[dict], names: dict[int, str] | None) -> None:
+def _render_permitted_group(
+    group: list[dict], names: dict[int, str] | None, group_registry: dict[str, str] | None = None
+) -> None:
     top = _primary_candidate(group[0])
     label, bucket = (_verdict_label(top["verdict"], top.get("max_level_mg_kg")) if top else ("Allowed", "permitted"))
     group_note_match = _GROUP_CONDITIONS_RE.match((top or {}).get("conditions") or "")
@@ -562,15 +690,27 @@ def _render_permitted_group(group: list[dict], names: dict[int, str] | None) -> 
         + (f"<p class='eu-caption'>Applies{where_html}</p>" if where_html else ""),
         unsafe_allow_html=True,
     )
-    _render_citation_and_conditions(top, [])
+    _render_citation_and_conditions(top, [], group_registry)
     st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
 
 
-def render_permitted_section(title: str, items: list[dict], names: dict[int, str] | None = None) -> None:
+def render_permitted_section(
+    title: str,
+    items: list[dict],
+    names: dict[int, str] | None = None,
+    group_registry: dict[str, str] | None = None,
+) -> None:
     """Like render_verdict_section, but items sharing the exact same block
     (see _permitted_group_key) render ONCE, with every additive that
     shares it listed together, instead of repeating the same explanation
-    and conditions text once per additive."""
+    and conditions text once per additive. `group_registry` (see
+    render_group_conditions_block) handles the ORTHOGONAL case this
+    doesn't: the exact same Group clause appearing under a DIFFERENT
+    category or component within this section (a different
+    _permitted_group_key, since category/component differ, but the same
+    conditions text) -- those groups still render their own head/verdict
+    block, but the conditions themselves collapse to a shared-block
+    reference."""
     if not items:
         return
     st.markdown(f"<div class='eu-section-title'>{_esc(title)} ({len(items)})</div>", unsafe_allow_html=True)
@@ -587,9 +727,9 @@ def render_permitted_section(title: str, items: list[dict], names: dict[int, str
     for key in order:
         group = groups[key]
         if len(group) == 1:
-            render_verdict_row(group[0], names)
+            render_verdict_row(group[0], names, group_registry=group_registry)
         else:
-            _render_permitted_group(group, names)
+            _render_permitted_group(group, names, group_registry=group_registry)
 
 
 def render_out_of_scope(items: list[dict], names: dict[int, str] | None = None) -> None:

@@ -5,12 +5,15 @@ from src.ui.components import (
     _blocking_reason,
     _conditions_notes,
     _display_name,
+    _group_conditions_map,
     _group_note,
     _is_ancestor_code,
+    _normalize_conditions,
     _out_of_scope_reason,
     _period_of_application_note,
     _permitted_group_key,
     _primary_candidate,
+    _pure_group_match,
     _short_category_name,
     _substitute_flag_label,
     _verdict_caveats,
@@ -454,3 +457,92 @@ def test_permitted_group_key_differs_when_conditions_differ():
         "confirmed_fcs_code": "5.1",
     }
     assert _permitted_group_key(item_a) != _permitted_group_key(item_b)
+
+
+# ---- Group I/II/... shared-block dedup (_normalize_conditions,
+# _pure_group_match, _group_conditions_map) -----------------------------
+
+_QS_CLAUSE_ONE_LINE = (
+    "Permitted via Group I, Additives; ML = quantum satis; except E 425 ML = 10000 mg/kg."
+)
+_QS_CLAUSE_WITH_NEWLINE = (
+    "Permitted via Group I, Additives; ML = quantum satis; except E 425 ML =\n10000 mg/kg."
+)
+_QS_CLAUSE_NO_PERIOD = (
+    "Permitted via Group I, Additives; ML = quantum satis; except E 425 ML = 10000 mg/kg"
+)
+# A real merged shape (MEASURED in data/outputs/verdict/GraphTestChips.json,
+# INS 627/631): Group I is clause 1 of 2, the second clause (Ribonucleotides)
+# is NOT a Group permission and must not be dropped.
+_MIXED_GROUP_AND_OTHER = (
+    f"1) {_QS_CLAUSE_ONE_LINE}\n\n2) Permitted via Ribonucleotides"
+)
+
+
+def test_normalize_conditions_collapses_whitespace_and_trailing_period_variants():
+    normalized = {
+        _normalize_conditions(_QS_CLAUSE_ONE_LINE),
+        _normalize_conditions(_QS_CLAUSE_WITH_NEWLINE),
+        _normalize_conditions(_QS_CLAUSE_NO_PERIOD),
+    }
+    assert len(normalized) == 1
+
+
+def test_pure_group_match_matches_a_plain_group_clause():
+    match = _pure_group_match(_QS_CLAUSE_ONE_LINE)
+    assert match is not None
+    assert match.group(1) == "Group I, Additives"
+
+
+def test_pure_group_match_none_for_non_group_conditions():
+    assert _pure_group_match("Permitted via Silicon dioxide - silicates; only tuna") is None
+
+
+def test_pure_group_match_none_for_merged_multi_clause_conditions():
+    # Group I is only ONE of two co-applicable clauses here -- collapsing
+    # this to a reference would silently drop the Ribonucleotides clause,
+    # so it must NOT be treated as a pure Group match.
+    assert _pure_group_match(_MIXED_GROUP_AND_OTHER) is None
+
+
+def test_group_conditions_map_dedupes_whitespace_variants_of_the_same_clause():
+    item_a = {"by_category": [_candidate("14.1.4", "permitted_qs", conditions=_QS_CLAUSE_ONE_LINE)]}
+    item_b = {"by_category": [_candidate("1.4", "permitted_qs", conditions=_QS_CLAUSE_WITH_NEWLINE)]}
+    item_c = {"by_category": [_candidate("5.2", "permitted_qs", conditions=_QS_CLAUSE_NO_PERIOD)]}
+    reps = _group_conditions_map([item_a, item_b, item_c])
+    assert len(reps) == 1
+
+
+def test_group_conditions_map_excludes_merged_multi_clause_items():
+    # The whole point of the guard: an item whose conditions merges Group I
+    # with a non-Group clause must never enter the shared-block registry,
+    # even though the text starts with "1) Permitted via Group I..." --
+    # entering it would mean this item's own per-item render collapses to
+    # a reference that omits the Ribonucleotides clause entirely.
+    pure_item = {"by_category": [_candidate("14.1.4", "permitted_qs", conditions=_QS_CLAUSE_ONE_LINE)]}
+    mixed_item = {"by_category": [_candidate("14.1.4", "permitted_qs", conditions=_MIXED_GROUP_AND_OTHER)]}
+    reps = _group_conditions_map([pure_item, mixed_item])
+    assert len(reps) == 1
+    (only_entry,) = reps.values()
+    assert only_entry["conditions"] == _QS_CLAUSE_ONE_LINE
+
+
+def test_group_conditions_map_spans_items_regardless_of_category_or_component():
+    # This is the case _permitted_group_key alone cannot dedupe: the same
+    # clause under a DIFFERENT category/component still collapses to one
+    # shared-block entry.
+    item_a = {
+        "component_label": "CRISPS",
+        "by_category": [_candidate("14.1.4", "permitted_qs", conditions=_QS_CLAUSE_ONE_LINE)],
+    }
+    item_b = {
+        "component_label": "SEASONING",
+        "by_category": [_candidate("12.2.2", "permitted_qs", conditions=_QS_CLAUSE_ONE_LINE)],
+    }
+    reps = _group_conditions_map([item_a, item_b])
+    assert len(reps) == 1
+
+
+def test_group_conditions_map_empty_when_no_item_carries_a_group_clause():
+    item = {"by_category": [_candidate("5.2", "permitted_qs", conditions="only tuna")]}
+    assert _group_conditions_map([item]) == {}

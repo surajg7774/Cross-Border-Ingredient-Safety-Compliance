@@ -75,3 +75,107 @@ def test_dosage_caveat_identical_regardless_of_narration_state():
     dosage_success = next(c.value for c in at_success.caption if "dosage" in c.value.lower())
     dosage_fallback = next(c.value for c in at_fallback.caption if "dosage" in c.value.lower())
     assert dosage_success == dosage_fallback
+
+
+# ---- Group I/II/... shared-block dedup (app.py's render_results wiring) ---
+
+# Two whitespace variants of the exact same clause, exactly as eu_fip
+# actually stores it in more than one form (see
+# tests/test_components.py's _normalize_conditions tests for the measured
+# variant count against the real data).
+_GROUP_CLAUSE_A = "Permitted via Group I, Additives; ML = quantum satis; except E 425 ML = 10000 mg/kg."
+_GROUP_CLAUSE_B = "Permitted via Group I, Additives; ML = quantum satis; except E 425 ML =\n10000 mg/kg."
+
+
+def _group_conditions_item(eu_id, component, fcs_code, category_name, conditions):
+    return {
+        "eu_canonical_id": eu_id,
+        "component_label": component,
+        "flags": [],
+        "confirmed_fcs_code": fcs_code,
+        "by_category": [
+            {
+                "fcs_code": fcs_code,
+                "category_name": category_name,
+                "rank": 1,
+                "verdict": "permitted_qs",
+                "max_level_mg_kg": None,
+                "max_level_basis": None,
+                "conditions": conditions,
+                "note_codes": [],
+                "source_url": f"https://example.org/{eu_id}",
+                "retrieved_date": "2020-01-01",
+            }
+        ],
+    }
+
+
+def _render_group_conditions_script() -> str:
+    item_a = _group_conditions_item("300", "CRISPS", "14.1.4", "Flavoured drinks", _GROUP_CLAUSE_A)
+    item_b = _group_conditions_item("301", "SEASONING", "12.2.2", "Seasonings", _GROUP_CLAUSE_B)
+    return f"""
+import streamlit as st
+from src.ui import components
+
+item_a = {item_a!r}
+item_b = {item_b!r}
+registry = components.render_group_conditions_block([item_a, item_b])
+components.render_permitted_section("Permitted", [item_a, item_b], group_registry=registry)
+"""
+
+
+def test_group_conditions_render_once_with_a_reference_for_the_repeat():
+    at = AppTest.from_string(_render_group_conditions_script()).run()
+    assert not at.exception
+
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    # The full clause (either whitespace variant collapses to this once
+    # normalized) appears exactly once -- in the shared block -- not once
+    # per additive that carries it.
+    assert markdown_html.count("Permitted via Group I, Additives; ML = quantum satis") == 1
+    # Both additives are still traceable: each links back to the shared
+    # block instead of the text vanishing outright.
+    assert (
+        markdown_html.count(
+            "see the <a href='#group-conditions-1'>Group I, Additives conditions above</a>"
+        )
+        == 2
+    )
+    # The shared block's anchor exists so that link actually resolves.
+    assert "id='group-conditions-1'" in markdown_html
+    # Every item keeps its OWN citation -- collapsing conditions to a
+    # reference must not touch source/date, which differ per item.
+    assert "https://example.org/300" in markdown_html
+    assert "https://example.org/301" in markdown_html
+
+
+def test_group_conditions_block_absent_when_no_item_carries_one():
+    script = """
+from src.ui import components
+
+item = {
+    "eu_canonical_id": "1",
+    "component_label": None,
+    "flags": [],
+    "confirmed_fcs_code": "5.2",
+    "by_category": [
+        {
+            "fcs_code": "5.2",
+            "category_name": "Cocoa",
+            "rank": 1,
+            "verdict": "permitted_qs",
+            "max_level_mg_kg": None,
+            "max_level_basis": None,
+            "conditions": "only tuna",
+            "note_codes": [],
+            "source_url": None,
+            "retrieved_date": None,
+        }
+    ],
+}
+registry = components.render_group_conditions_block([item])
+assert registry == {}
+"""
+    at = AppTest.from_string(script).run()
+    assert not at.exception
+    assert at.markdown == []
