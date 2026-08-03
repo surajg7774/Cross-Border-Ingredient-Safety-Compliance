@@ -4,17 +4,23 @@ import hashlib
 import json
 from io import BytesIO
 
-from google import genai
-from google.genai import types
 from PIL import Image
 from pydantic import BaseModel, ValidationError
 
 from config import settings
-from src.model_call import retry_delay_seconds, strip_markdown_fences, with_retry
+from src.model_call import strip_markdown_fences
 from src.prompts import EXTRACT_PROMPT, GATE_PROMPT
 from src.schemas import ExtractionResult, GateResult
+from src.text_generation import EmptyResponseError, get_vision_generator
 
 MAX_VALIDATION_RETRIES = 2
+# No longer read by _call_model (that retry policy -- including
+# retry_delay_fn=retry_delay_seconds and RETRY_DELAY_MARGIN_SECONDS -- now
+# lives in src/text_generation.py's GeminiVisionGenerator/
+# LangChainVisionGenerator, with these identical values). Kept in place,
+# per instruction, as this call site's own record of what tuning it
+# expects, and because tests/test_gemini_extractor_retry.py still imports
+# INITIAL_BACKOFF_SECONDS and RETRY_DELAY_MARGIN_SECONDS from here directly.
 MAX_RATE_LIMIT_RETRIES = 5
 INITIAL_BACKOFF_SECONDS = 2.0
 # Added to the server's own RetryInfo.retryDelay before sleeping -- a small
@@ -25,9 +31,21 @@ RETRY_DELAY_MARGIN_SECONDS = 1.0
 # backing off and retrying rather than failing the whole run immediately.
 RETRYABLE_STATUS_CODES = {429, 500, 503}
 
-
-class EmptyResponseError(RuntimeError):
-    """Raised when the model returns no text — blocked or truncated, not a crash."""
+# No longer defines its own EmptyResponseError. _call_model used to raise
+# one itself; now that it delegates to src.text_generation's VisionGenerator
+# (see below), that module's EmptyResponseError is what actually gets
+# raised. This module's own class would be dead code AND, worse, a trap:
+# _run()'s except tuple below catches EmptyResponseError BY NAME as one of
+# its three retry-triggering failure types (see that docstring). If a local
+# class were re-added here without also re-pointing the except tuple at it,
+# the tuple would silently stop matching what src.text_generation actually
+# raises -- an empty response would then propagate immediately instead of
+# triggering the MAX_VALIDATION_RETRIES retry-with-feedback loop, which is
+# exactly the dangerous failure mode this module exists to avoid (a label
+# that fails to read must retry-then-FAIL, never silently produce nothing).
+# tests/test_gemini_extractor.py's
+# test_empty_response_triggers_validation_retry_not_immediate_raise guards
+# against this regression.
 
 
 def _mime_type(image_bytes: bytes) -> str:
@@ -39,6 +57,22 @@ def _cache_key(image_bytes: bytes, model_id: str, pass_name: str, prompt: str) -
     # The prompt text is part of the key so that editing a prompt invalidates
     # the cache — otherwise prompt iteration would silently keep returning
     # results generated under the old wording.
+    #
+    # Also NOT keyed on settings.MODEL_BACKEND. This rests on
+    # REQUEST-CONSTRUCTION equivalence, verified by reading the installed
+    # langchain-google-genai source (see src/text_generation.py's module
+    # docstring, "WHAT WAS CHECKED FOR MULTIMODAL INPUT SPECIFICALLY"):
+    # langchain's "media" content block and google-genai's own
+    # types.Part.from_bytes both build the identical Part(inline_data=
+    # Blob(...)) object before either reaches the same underlying
+    # generate_content call. That is NOT the same as a live comparison of
+    # actual model output across both backends on a real image -- none has
+    # been made. A live cross-backend extraction comparison on real labels
+    # is required before MODEL_BACKEND=langchain is trusted for real
+    # extraction runs; until then, treat a cached result as backend-specific
+    # in spirit even though the key does not partition on it. If that
+    # comparison ever finds real divergence, MODEL_BACKEND must be folded
+    # into this key -- do not guess it back in preemptively before that.
     digest = hashlib.sha256()
     digest.update(image_bytes)
     digest.update(model_id.encode("utf-8"))
@@ -52,7 +86,6 @@ class GeminiExtractor:
 
     def __init__(self, model_id: str):
         self.model_id = model_id
-        self._client = genai.Client(api_key=settings.GOOGLE_API_KEY)
 
     def gate(self, image_bytes: bytes) -> GateResult:
         return self._run(image_bytes, GATE_PROMPT, "gate", GateResult)
@@ -98,31 +131,12 @@ class GeminiExtractor:
         raise ValueError(f"{pass_name} extraction failed after retries: {last_error}")
 
     def _call_model(self, image_bytes: bytes, prompt: str) -> str:
-        """Call the model once, retrying with exponential backoff (or the
-        server's own RetryInfo delay) on transient errors -- see
-        src/model_call.py's with_retry."""
-        part = types.Part.from_bytes(data=image_bytes, mime_type=_mime_type(image_bytes))
-
-        def _call() -> str:
-            response = self._client.models.generate_content(model=self.model_id, contents=[prompt, part])
-            if response.text is None:
-                # The SDK returns None text when a response is blocked
-                # (safety) or truncated (e.g. hit max output tokens) —
-                # treat that as a failed attempt, not a crash.
-                finish_reason = None
-                if response.candidates:
-                    finish_reason = response.candidates[0].finish_reason
-                raise EmptyResponseError(
-                    f"model returned no text (finish_reason={finish_reason}, "
-                    f"prompt_feedback={response.prompt_feedback})"
-                )
-            return response.text
-
-        return with_retry(
-            _call,
-            max_retries=MAX_RATE_LIMIT_RETRIES,
-            initial_backoff_seconds=INITIAL_BACKOFF_SECONDS,
-            retryable_status_codes=RETRYABLE_STATUS_CODES,
-            retry_delay_fn=retry_delay_seconds,
-            retry_delay_margin_seconds=RETRY_DELAY_MARGIN_SECONDS,
-        )
+        """Delegates to whichever src.text_generation.VisionGenerator
+        settings.MODEL_BACKEND selects -- "native" (default, the exact
+        google-genai call path this function used inline before) or
+        "langchain" (opt-in). See src/text_generation.py's module docstring
+        for the retry policy, and for what the langchain backend does and
+        does not reproduce for multimodal input specifically -- including
+        what is not yet live-verified before trusting it for a real
+        extraction run."""
+        return get_vision_generator().complete(prompt, image_bytes, _mime_type(image_bytes), self.model_id)
