@@ -1,12 +1,13 @@
 # DESIGN RULE: this is a SEPARATE module from src/model_call.py, not an
 # addition to it, so that importing it (and, transitively,
 # langchain-google-genai) stays scoped to whatever opts into it --
-# currently only src/report/narrator.py, behind the MODEL_BACKEND setting.
-# Every other direct-call site (src/extractors/gemini.py, src/agent/
-# resolver_agent.py, src/category/multiquery.py) keeps importing ONLY
-# src/model_call.py's plumbing (strip_markdown_fences, with_retry) and
-# never sees langchain-google-genai at all, even at import time -- this
-# migration phase is narrator-only, per instruction.
+# src/report/narrator.py and src/category/multiquery.py, both behind the
+# MODEL_BACKEND setting, as of migration Phase 3. Every other direct-call
+# site (src/extractors/gemini.py, src/agent/resolver_agent.py) keeps
+# importing ONLY src/model_call.py's plumbing (strip_markdown_fences,
+# with_retry) and never sees langchain-google-genai at all, even at import
+# time -- extraction, embeddings, and the agent are explicitly out of scope
+# for this migration, per instruction.
 """A text-generation Protocol -- "send one prompt, get raw text back" --
 with two implementations, following the same shape src/agent/
 resolver_agent.py already uses for its own LLM Protocol
@@ -95,9 +96,19 @@ RETRYABLE_STATUS_CODES = {429, 500, 503}
 
 class EmptyResponseError(RuntimeError):
     """Raised when the model returns no text -- blocked or truncated, not a
-    crash. Same meaning, one per provider-facing module, as
-    src/extractors/gemini.py's and src/report/narrator.py's own exception
-    of the same name."""
+    crash. The ONE definition every module that delegates to
+    get_text_generator() raises and lets propagate -- src/report/narrator.py
+    and src/category/multiquery.py neither define nor need their own
+    same-named class any more (narrator.py catches broadly regardless of
+    exception type; multiquery.py's generate_paraphrases() lets whatever
+    this raises propagate unchanged). src/extractors/gemini.py and
+    src/agent/resolver_agent.py still call google-genai directly (out of
+    scope for this migration) and each keep their own, separate, same-named
+    class -- catching gemini.py's does NOT catch this one, and vice versa;
+    they are unrelated classes that happen to share a name.
+    src/agent/resolver_agent.py uses a different LLM Protocol entirely
+    (GeminiLLM/MockLLM) and does not define or raise this exception at
+    all."""
 
 
 def _extract_message_text(content: object) -> str:

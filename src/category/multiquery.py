@@ -2,7 +2,10 @@
 # src/category/embedder.py -- caching generated paraphrases to disk for the
 # same practical reason (avoiding repeat API cost on every re-run), not part
 # of the pure retrieval core (corpus.py / filter.py / classifier.py stay
-# pure).
+# pure). The model call itself is delegated to src/text_generation.py's
+# TextGenerator (see _call_model below) -- this module no longer imports
+# google-genai (or langchain-google-genai) directly, same as
+# src/report/narrator.py.
 """Multi-query retrieval: paraphrase a query text several ways via one LLM
 call, so retrieval is scored against several phrasings and fused, instead
 of living or dying on one. MOTIVATION, measured: adding a hand-written
@@ -17,11 +20,16 @@ generates and caches the paraphrases.
 import hashlib
 import json
 
-from google import genai
-
 from config import settings
-from src.model_call import strip_markdown_fences, with_retry
+from src.model_call import strip_markdown_fences
+from src.text_generation import get_text_generator
 
+# No longer read by _call_model (that retry policy now lives in
+# src/text_generation.py's GeminiTextGenerator/LangChainTextGenerator, with
+# the identical values). Kept in place, per instruction, as this call
+# site's own record of what tuning it expects -- if text_generation.py's
+# constants ever diverge from these, that is a signal worth noticing, not
+# a reason to delete the comparison point.
 MAX_RATE_LIMIT_RETRIES = 5
 INITIAL_BACKOFF_SECONDS = 2.0
 # Same retryable set as src/extractors/gemini.py: 429 = rate limited,
@@ -40,8 +48,18 @@ Respond with RAW JSON ONLY, no markdown code fences: a JSON array of \
 exactly {n} strings, nothing else."""
 
 
-class EmptyResponseError(RuntimeError):
-    """Raised when the model returns no text -- blocked or truncated, not a crash."""
+# No longer defines its own EmptyResponseError. _call_model used to raise
+# one itself, with a message that (unlike src/text_generation.py's own,
+# equivalent, class) omitted prompt_feedback -- one of four inconsistent
+# empty-response shapes an audit flagged across the codebase. Now that
+# _call_model fully delegates (below), this module never constructs that
+# exception itself; whatever src.text_generation.TextGenerator.complete()
+# raises propagates unchanged, so there is nothing left for a same-named
+# local class to mean -- it would just be a second name for the same
+# failure, one more place to keep in sync. src/report/narrator.py, migrated
+# the same way, has none either. No caller in this codebase catches
+# `multiquery.EmptyResponseError` by name (checked); a caller that needs to
+# catch this specifically should catch src.text_generation.EmptyResponseError.
 
 
 def _cache_key(query_text: str, model_id: str, n: int) -> str:
@@ -50,6 +68,22 @@ def _cache_key(query_text: str, model_id: str, n: int) -> str:
     # a project-specific behaviour that would need re-generating after a
     # wording tweak. If that assumption stops holding, fold the prompt into
     # this key the same way gemini.py does.
+    #
+    # Also NOT keyed on settings.MODEL_BACKEND, deliberately -- considered
+    # and rejected when _call_model was migrated to delegate to
+    # src/text_generation.py. MODEL_BACKEND selects a TRANSPORT (which
+    # client library reaches model_id), not a different model or a different
+    # request; src/text_generation.py's whole design goal, proven by
+    # test_narrator.py's cross-backend identical-output test, is that both
+    # backends behave identically for a successful call. Partitioning the
+    # cache by backend would treat an infrastructure choice as if it changed
+    # the answer, forcing a wasted re-generation on every backend switch for
+    # no measured benefit. UNVERIFIED for real (non-mocked) traffic, though:
+    # this holds only if the two backends truly produce the same output
+    # distribution for identical prompts, which has only been checked
+    # against a mocked identical response, not measured live. If that is
+    # ever measured to not hold, this key needs MODEL_BACKEND folded in --
+    # do not guess it back in preemptively.
     digest = hashlib.sha256()
     digest.update(query_text.encode("utf-8"))
     digest.update(model_id.encode("utf-8"))
@@ -69,26 +103,13 @@ def _save_cache(cache: dict[str, list[str]]) -> None:
 
 
 def _call_model(prompt: str, model_id: str) -> str:
-    """Call the model once, retrying with exponential backoff on transient
-    errors -- see src/model_call.py's with_retry. No retry_delay_fn: plain
-    exponential only, exactly as before consolidation."""
-    client = genai.Client(api_key=settings.GOOGLE_API_KEY)
-
-    def _call() -> str:
-        response = client.models.generate_content(model=model_id, contents=[prompt])
-        if response.text is None:
-            finish_reason = None
-            if response.candidates:
-                finish_reason = response.candidates[0].finish_reason
-            raise EmptyResponseError(f"model returned no text (finish_reason={finish_reason})")
-        return response.text
-
-    return with_retry(
-        _call,
-        max_retries=MAX_RATE_LIMIT_RETRIES,
-        initial_backoff_seconds=INITIAL_BACKOFF_SECONDS,
-        retryable_status_codes=RETRYABLE_STATUS_CODES,
-    )
+    """Delegates to whichever src.text_generation.TextGenerator
+    settings.MODEL_BACKEND selects -- "native" (default, the exact
+    google-genai call path this function used inline before) or
+    "langchain" (opt-in). See src/text_generation.py's module docstring
+    for the retry policy, and for what the langchain backend cannot fully
+    reproduce."""
+    return get_text_generator().complete(prompt, model_id)
 
 
 def generate_paraphrases(query_text: str, n: int, model_id: str) -> list[str]:

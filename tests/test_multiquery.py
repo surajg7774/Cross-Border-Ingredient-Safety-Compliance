@@ -1,9 +1,14 @@
 """Tests for src/category/multiquery.py -- mocked model calls, no network."""
 
 import json
+from unittest.mock import Mock
 
 import pytest
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
+from langchain_google_genai import ChatGoogleGenerativeAI
 
+from config import settings
 from src.category import multiquery
 from src.category.multiquery import generate_paraphrases
 
@@ -94,3 +99,63 @@ def test_generate_paraphrases_n_below_2_returns_empty_without_calling_model(monk
     monkeypatch.setattr(multiquery, "_call_model", fail_if_called)
     assert generate_paraphrases("Seasoning", 1, "fake-model") == []
     assert generate_paraphrases("Seasoning", 0, "fake-model") == []
+
+
+# --------------------------------------------------------------------------- #
+# MODEL_BACKEND switch -- both backends through the REAL get_text_generator()
+# selection (not a _call_model monkeypatch, which would bypass the switch
+# entirely), each with a mocked provider, proving identical output for
+# identical input. Same pattern as tests/test_narrator.py.
+# --------------------------------------------------------------------------- #
+_FAKE_JSON_RESPONSE = json.dumps(["Seasoning spice blend", "Spice and seasoning mix"])
+
+
+def test_paraphrases_identical_output_through_both_backends(monkeypatch):
+    query_text, n, model_id = "Seasoning", 3, "fake-model"
+
+    # -- native: google-genai's own Client, constructed inside
+    # GeminiTextGenerator.__init__ -- patched globally (google.genai.Client
+    # itself), since _call_model -> get_text_generator() constructs a fresh
+    # GeminiTextGenerator on every call; there is no instance to swap
+    # ._client on from outside.
+    fake_gemini_client = Mock()
+    fake_gemini_client.models.generate_content.return_value = Mock(text=_FAKE_JSON_RESPONSE, candidates=[])
+    monkeypatch.setattr("google.genai.Client", lambda **kwargs: fake_gemini_client)
+    monkeypatch.setattr(settings, "MODEL_BACKEND", "native")
+
+    native_result = generate_paraphrases(query_text, n, model_id)
+
+    # The cache key does NOT include MODEL_BACKEND (see multiquery._cache_key's
+    # own comment on why not) -- a second call with the SAME (query_text,
+    # model_id, n) would otherwise hit the cache the native call just wrote
+    # and never touch the langchain path at all. Reset it so this is a real
+    # second call, not a cache hit.
+    multiquery._save_cache({})
+
+    # -- langchain: ChatGoogleGenerativeAI.generate patched at the class
+    # level for the same reason (a fresh instance per complete() call).
+    fake_langchain_result = LLMResult(
+        generations=[[ChatGeneration(message=AIMessage(content=_FAKE_JSON_RESPONSE))]],
+        llm_output={},
+    )
+    monkeypatch.setattr(ChatGoogleGenerativeAI, "generate", lambda self, messages: fake_langchain_result)
+    monkeypatch.setattr(settings, "MODEL_BACKEND", "langchain")
+
+    langchain_result = generate_paraphrases(query_text, n, model_id)
+
+    assert native_result == langchain_result
+    assert native_result == ["Seasoning spice blend", "Spice and seasoning mix"]
+
+
+def test_paraphrases_native_backend_is_the_default(monkeypatch):
+    # No MODEL_BACKEND override at all -- current behaviour is what runs.
+    assert settings.MODEL_BACKEND == "native"
+
+    fake_gemini_client = Mock()
+    fake_gemini_client.models.generate_content.return_value = Mock(text=_FAKE_JSON_RESPONSE, candidates=[])
+    monkeypatch.setattr("google.genai.Client", lambda **kwargs: fake_gemini_client)
+
+    result = generate_paraphrases("Seasoning", 3, "fake-model")
+
+    assert result == ["Seasoning spice blend", "Spice and seasoning mix"]
+    fake_gemini_client.models.generate_content.assert_called_once()

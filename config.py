@@ -21,10 +21,11 @@ class Settings(BaseSettings):
     SECONDARY_MODEL: str
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     # Which src/text_generation.py TextGenerator implementation
-    # src/report/narrator.py calls -- "native" (google-genai directly,
-    # unchanged default behaviour) or "langchain" (ChatGoogleGenerativeAI,
-    # same retry policy/model IDs, opt-in). See src/text_generation.py's
-    # module docstring for what "langchain" cannot reproduce.
+    # src/report/narrator.py and src/category/multiquery.py call --
+    # "native" (google-genai directly, unchanged default behaviour) or
+    # "langchain" (ChatGoogleGenerativeAI, same retry policy/model IDs,
+    # opt-in). See src/text_generation.py's module docstring for what
+    # "langchain" cannot reproduce.
     MODEL_BACKEND: Literal["native", "langchain"] = "native"
     CACHE_DIR: Path = Path(".cache")
     OUTPUT_DIR: Path = Path("data/outputs")
