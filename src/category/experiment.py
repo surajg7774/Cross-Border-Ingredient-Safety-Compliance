@@ -15,6 +15,16 @@ class ExperimentConfig:
     name: str = "baseline"
     parent_inheritance: bool = True  # corpus.py: embed ancestor name/description text
     intersection_filter: bool = True  # classifier.py: apply the additive-permission filter
+    # scripts/classify_category.py::_classify_file: restrict a query's
+    # candidate categories to only those sharing a functional class with
+    # its resolved additives (src.category.filter.functional_class_
+    # candidates), BEFORE classify() ever sees a scores dict -- a PRE-filter,
+    # not a post-hoc re-rank, and a SEPARATE mechanism from
+    # intersection_filter above (both may be on at once; see filter.py's
+    # module docstring for why they don't double-filter the same way).
+    # OFF by default -- an ablation, not adopted behaviour; see
+    # docs/findings.md for the measured effect.
+    functional_class_filter: bool = False
     include_descriptor: bool = True  # classifier.py: include product_name/product_descriptor in queries
     # classifier.py: prepend a component query's own label to its text --
     # OFF by default because "Centre" alone says nothing about the food, but
@@ -169,4 +179,22 @@ CONFIGS: dict[str, ExperimentConfig] = {
     "mqr-3": ExperimentConfig(name="mqr-3", multi_query=3, include_component_name=True),
     "mqr-5": ExperimentConfig(name="mqr-5", multi_query=5, include_component_name=True),
     "hybrid": ExperimentConfig(name="hybrid", hybrid=True, include_component_name=True),
+    # functional_class_filter ablation -- paired with include_component_name
+    # (the operating config, "with-component-name", is the 0.53/0.82/0.66
+    # baseline these are measured against) and each other, isolating ONLY
+    # the filter dimension: which of permitted_in() (intersection_filter),
+    # functional_class_candidates() (functional_class_filter), both, or
+    # neither is doing the work -- see docs/findings.md.
+    "functional-class-filter-only": ExperimentConfig(
+        name="functional-class-filter-only",
+        include_component_name=True,
+        intersection_filter=False,
+        functional_class_filter=True,
+    ),
+    "both-filters": ExperimentConfig(
+        name="both-filters",
+        include_component_name=True,
+        intersection_filter=True,
+        functional_class_filter=True,
+    ),
 }

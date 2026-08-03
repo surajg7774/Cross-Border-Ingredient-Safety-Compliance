@@ -36,8 +36,9 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from config import settings
+from src.category.chroma_store import build_chroma_index
 from src.category.corpus import build_corpus, parse_food_categories
-from src.category.embedder import GeminiEmbedder
+from src.category.embedder import DIMENSIONALITY, GeminiEmbedder
 from src.category.experiment import CONFIGS, ExperimentConfig
 from src.extractors.base import LabelExtractor
 from src.extractors.gemini import GeminiExtractor
@@ -139,10 +140,32 @@ def build_pipeline(
     embeddings = embedder.embed_documents(documents)
     refs.categories = categories
 
+    # settings.RETRIEVAL_STORE is read ONCE, here, at graph-construction time
+    # -- not per classify-node call -- matching nodes.py's own DESIGN RULE
+    # that reference data is passed in once and closed over. "numpy"
+    # (default) leaves chroma_index None and make_classify_node falls back
+    # to its existing embedding_scores path, unchanged. Building the index
+    # (persist_path=settings.CHROMA_PERSIST_DIR) costs no API call either
+    # way -- it indexes the SAME `embeddings` dict just computed above, from
+    # cache -- and is a no-op rebuild whenever the persisted corpus_hash
+    # already matches (see chroma_store.py's STALENESS section).
+    chroma_index = None
+    if settings.RETRIEVAL_STORE == "chroma":
+        chroma_index = build_chroma_index(
+            documents,
+            embeddings,
+            persist_path=settings.CHROMA_PERSIST_DIR,
+            model_id=embedder.model_id,
+            dimensionality=DIMENSIONALITY,
+        )
+
     graph = StateGraph(PipelineState)
     graph.add_node("extract", make_extract_node(extractor))
     graph.add_node("resolve", make_resolve_node(refs.resolver_refs))
-    graph.add_node("classify", make_classify_node(categories, embeddings, embedder, refs.eu_fip, category_config))
+    graph.add_node(
+        "classify",
+        make_classify_node(categories, embeddings, embedder, refs.eu_fip, category_config, chroma_index=chroma_index),
+    )
     graph.add_node("confirm", make_confirm_node(auto_confirm))
     graph.add_node("verdict", make_verdict_node(refs.eu_fip, refs.category_names))
     graph.add_node("substitutes", make_substitutes_node(refs.eu_fip, refs.codex_ins))

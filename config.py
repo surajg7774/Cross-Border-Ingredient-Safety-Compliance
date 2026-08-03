@@ -29,6 +29,17 @@ class Settings(BaseSettings):
     # for gemini.py specifically, what has and has not been verified for
     # multimodal (image) input.
     MODEL_BACKEND: Literal["native", "langchain"] = "native"
+    # Which store src/graph/pipeline.py's classify node searches the
+    # category corpus through -- "numpy" (default, exhaustive cosine
+    # similarity, src/category/classifier.py's embedding_scores, unchanged
+    # behaviour) or "chroma" (src/category/chroma_store.py, a persisted
+    # index built from the SAME cached embeddings, adopted for store
+    # properties -- persistence, metadata filtering -- not accuracy;
+    # docs/findings.md F-11 measured identical ranking to numpy, at extra
+    # cost, and F-11 is still true). Rankings must be identical between the
+    # two; see tests/test_category.py's cross-store test.
+    RETRIEVAL_STORE: Literal["numpy", "chroma"] = "numpy"
+    CHROMA_PERSIST_DIR: Path = Path(".cache/chroma")
     CACHE_DIR: Path = Path(".cache")
     OUTPUT_DIR: Path = Path("data/outputs")
     EXTRACTION_OUTPUT_DIR: Path = OUTPUT_DIR / "extraction"

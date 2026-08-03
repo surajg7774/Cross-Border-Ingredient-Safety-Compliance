@@ -51,6 +51,11 @@ from src.category.classifier import (
 from src.category.corpus import build_corpus
 from src.category.embedder import GeminiEmbedder
 from src.category.experiment import CONFIGS, ExperimentConfig
+from src.category.filter import (
+    functional_class_candidates,
+    functional_classes_by_category,
+    query_functional_classes,
+)
 from src.category.multiquery import generate_paraphrases
 from src.category.tfidf import build_tfidf_index, tfidf_mean_pairwise_similarity, tfidf_scores
 from src.logging_setup import setup_run_log
@@ -226,6 +231,8 @@ def _classify_file(
     config: ExperimentConfig,
     descriptions: dict,
     cli_description: str | None,
+    codex_ins: list[dict] | None = None,
+    category_functional_classes: dict[str, set[str]] | None = None,
 ) -> None:
     if not resolution_path.exists():
         console.print(f"[yellow]{resolution_path.name}: no resolution file, skipping[/yellow]")
@@ -258,6 +265,17 @@ def _classify_file(
             )
             continue
         scores, query_variants = score_query(query.text)
+        if config.functional_class_filter:
+            # A PRE-filter: restrict the candidate pool BEFORE classify()
+            # ever ranks it, not a re-rank of an already-retrieved top-K --
+            # see src/category/filter.py's module docstring on why this is
+            # a separate mechanism from config.intersection_filter, applied
+            # here rather than inside classify() so the two compose without
+            # either silently masking the other's effect.
+            query_classes = query_functional_classes(query.additive_ids, codex_ins or [])
+            candidates = functional_class_candidates(query_classes, category_functional_classes or {})
+            if candidates is not None:
+                scores = {code: score for code, score in scores.items() if code in candidates}
         results.append(classify(query, scores, categories, eu_fip, config, query_variants))
 
     table = Table(title=extraction_path.name)
@@ -358,6 +376,11 @@ def main(
         f"{corpus_mean_similarity:.4f}{build_text}\n"
     )
 
+    # Corpus-level, computed ONCE regardless of how many labels get
+    # classified below -- only when this config actually uses it, since it
+    # is an O(len(eu_fip)) pass no other config needs.
+    category_functional_classes = functional_classes_by_category(eu_fip, codex_ins) if config.functional_class_filter else None
+
     if all_files:
         paths = sorted(settings.RESOLUTION_OUTPUT_DIR.glob("*.json"))
         if not paths:
@@ -378,6 +401,8 @@ def main(
                 config,
                 descriptions,
                 description,
+                codex_ins,
+                category_functional_classes,
             )
     else:
         extraction_path = settings.EXTRACTION_OUTPUT_DIR / resolution_path.name
@@ -392,6 +417,8 @@ def main(
             config,
             descriptions,
             description,
+            codex_ins,
+            category_functional_classes,
         )
 
     if log_path:

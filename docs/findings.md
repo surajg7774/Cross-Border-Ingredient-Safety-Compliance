@@ -3,9 +3,9 @@ build, not renumbered afterward -- some numbers below are absent (F-01,
 F-08, F-15) because those findings were merged into another entry or
 withdrawn before being written up, not because this file is incomplete.
 F-06 was briefly a duplicate (two unrelated findings shared the number);
-the second was renumbered to F-07, the first unused ID, once noticed. 16
+the second was renumbered to F-07, the first unused ID, once noticed. 18
 findings are recorded here: F-02 through F-07, F-09 through F-14, and F-16
-through F-19.
+through F-21.
 
 ### Current operating config
 
@@ -396,3 +396,92 @@ Each golden file now carries a `truth_disclosure` header (`review_status`,
 pattern -- AI-drafted, cross-checked against eu_fip, NOT verified by a
 regulatory expert. Do not treat the 43 filled values as validated ground
 truth without independent Annex II review.
+
+## F-20 — ChromaDB adopted as a store option, still not for accuracy
+
+F-11 measured ChromaDB once (identical ranking to numpy, at extra cost) and
+did not adopt it. That code (`src/category/chroma_store.py`) was never
+deleted -- still present, still passing its own tests, untouched since one
+commit on 2026-08-02. Re-adopted now for STORE PROPERTIES (persistence,
+metadata filtering), not accuracy -- F-11's conclusion is unchanged and
+re-confirmed: a fresh top-3 comparison at real corpus scale (155 documents,
+768-dim cached vectors, a real cached query vector) still returns identical
+rankings between `embedding_scores` (numpy) and `chroma_scores` (Chroma).
+
+`settings.RETRIEVAL_STORE` ("numpy" default | "chroma") is now wired into
+the REAL pipeline (`src/graph/pipeline.py`'s `build_pipeline` ->
+`src/graph/nodes.py`'s `make_classify_node`), not just the ablation
+harness -- "numpy" leaves `chroma_index=None` and nothing about
+`classify_node`'s existing behaviour changes. "chroma" builds a
+`PersistentClient` index at `settings.CHROMA_PERSIST_DIR` from the SAME
+cached `category_embeddings.json` vectors -- confirmed zero API calls to
+build (155/155 cache hits) and confirmed to reuse the persisted index
+across repeated `build_pipeline()` calls without rebuilding, via a
+corpus_hash (codes + document text + model id + dimensionality) stored in
+the collection's own metadata; a mismatch triggers a full rebuild, logged
+at INFO, itself zero-API-call and sub-second.
+
+Test coverage extended (`tests/test_category.py`): the existing two
+ephemeral-path tests (F-11-era, still passing) plus four new persist-path
+tests -- numpy/chroma agree on a real top-3, a matching corpus_hash reuses
+rather than rebuilds, a changed corpus_hash rebuilds and logs why, and
+`model_id`/`dimensionality` are required (not silently skipped) when
+`persist_path` is given.
+
+## F-21 — functional-class pre-filter: no effect alone, one flip combined
+
+Proposed as a genuinely different mechanism from `src/category/filter.py`'s
+existing `permitted_in()`: that one re-ranks an ALREADY-RETRIEVED top-10 by
+exact additive-ID permission (a post-hoc filter, never removes a
+candidate); the new `functional_class_candidates()` restricts the
+candidate pool by a coarser signal (shared Codex functional class) BEFORE
+`classify()` ever ranks anything -- a genuine pre-filter. Implemented as a
+new orthogonal `ExperimentConfig.functional_class_filter` flag
+(`scripts/classify_category.py`'s `_classify_file`), so the two compose
+without silently double-filtering: config's own docstring and
+`filter.py`'s module docstring both document which does what.
+
+Scored three configs against the existing 17-component eval set
+(`category_truth.json`), same `truth_version` (`7a2f5babea7c`), cached
+embeddings only -- verified 155/155 corpus + 22/22 query embeddings were
+already cached (zero API calls) before running anything:
+
+    A. with-component-name (intersection filter only, the baseline)   0.5294 / 0.8235 / 0.6569
+    B. functional-class-filter-only (pre-filter only)                 0.5294 / 0.8235 / 0.6569
+    C. both-filters                                                   0.5882 / 0.8235 / 0.6863
+
+**Config B: no aggregate effect, but NOT inert.** Diffing every one of the
+17 scored rows between A and B shows the pre-filter genuinely changes
+predictions -- it flips Parle-Gmain's product-scope query from rank 2
+("15") to rank 1 ("7.2", the correct answer, the same "Group I permits it
+at 7.2, not at 15" case this project has documented since F-09) -- but it
+ALSO flips Chipsmain's "Seasoning" component from rank 1 ("12.2.2",
+correct) to rank 2, demoting the right answer by removing a competing
+candidate that the intersection filter would otherwise have needed to
+correctly re-rank past. One gain, one loss, net zero at n=17.
+
+**Config C: one net flip, mechanistically explained, not a broad win.**
+Diffing A against C shows exactly the SAME single change as A-to-B's gain
+(Parle-Gmain 15->7.2) with NO corresponding loss -- Chipsmain's "Seasoning"
+survives here because the intersection filter (still on) correctly
+re-ranks "12.2.2" back to rank 1 via genuine additive-permission matching,
+something the pre-filter alone had disturbed. The two filters are
+complementary on this one case: the pre-filter helps exactly where the
+intersection filter has nothing to work with (Parle-Gmain's product query
+has an EMPTY exact-additive-ID intersection, `permitted=False` for every
+top-3 candidate in both A and C -- the flip is caused entirely by "15"
+being removed from candidacy, not by any re-ranking), and the intersection
+filter fixes exactly where the pre-filter alone gets it wrong. The
+resulting 0.5294 -> 0.5882 recall@1 change is ONE flipped component out of
+17, not a broad or robust win -- squarely inside the "differences under
+~0.10 are one or two label-components" noise band F-13 already established
+for this eval set size.
+
+**Conclusion: do not adopt on this evidence.** The mechanism is real and
+explained, but n=17 cannot distinguish "genuinely useful in this specific
+configuration" from "happened to help once here." Logged as a measured,
+NOT-adopted alternative, the same discipline F-11 recorded ChromaDB with --
+`functional_class_filter` stays off by default
+(`ExperimentConfig.functional_class_filter: bool = False`), available only
+as the `functional-class-filter-only`/`both-filters` named configs for a
+future, larger eval set to revisit.

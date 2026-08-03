@@ -517,6 +517,87 @@ def test_chroma_exact_match_scores_near_one_not_near_zero():
 
 
 # --------------------------------------------------------------------------- #
+# chroma_store.py -- persist_path mode (src/graph/pipeline.py's production
+# wiring), including the staleness hash. tmp_path only, no API calls.
+# --------------------------------------------------------------------------- #
+_PERSIST_DOCUMENTS = {
+    "1": "a",
+    "2": "b",
+    "3": "c",
+    "4": "d",
+    "5": "e",
+}
+_PERSIST_EMBEDDINGS = {
+    "1": [1.0, 0.0, 0.0],
+    "2": [0.9, 0.1, 0.0],
+    "3": [0.0, 1.0, 0.0],
+    "4": [0.0, 0.9, 0.1],
+    "5": [0.0, 0.0, 1.0],
+}
+_PERSIST_QUERY = [1.0, 0.1, 0.0]
+
+
+def test_persisted_chroma_and_numpy_agree_on_top3_for_the_same_query(tmp_path):
+    # THE Task 2 requirement: numpy and a REAL PersistentClient-backed index
+    # (not just the ephemeral path the two tests above already cover) must
+    # return identical top-3 for the same query -- divergence is a bug, not
+    # a feature, per RETRIEVAL_STORE's own settings.py comment.
+    from_numpy = embedding_scores(_PERSIST_QUERY, _PERSIST_EMBEDDINGS)
+
+    index = build_chroma_index(
+        _PERSIST_DOCUMENTS, _PERSIST_EMBEDDINGS,
+        persist_path=tmp_path, model_id="test-model", dimensionality=3,
+    )
+    from_chroma = chroma_scores(index, _PERSIST_QUERY)
+
+    top3_numpy = sorted(from_numpy, key=from_numpy.get, reverse=True)[:3]
+    top3_chroma = sorted(from_chroma, key=from_chroma.get, reverse=True)[:3]
+    assert top3_numpy == top3_chroma
+
+
+def test_persisted_chroma_reuses_index_when_corpus_hash_matches(tmp_path):
+    first = build_chroma_index(
+        _PERSIST_DOCUMENTS, _PERSIST_EMBEDDINGS,
+        persist_path=tmp_path, model_id="test-model", dimensionality=3,
+    )
+    # Same documents/embeddings/model_id/dimensionality -> same corpus_hash
+    # -> the second call must find and reuse the persisted collection, not
+    # silently rebuild it (rebuilding is cheap, but if this ever regressed
+    # into rebuilding every call, a real persisted index would never
+    # actually persist anything).
+    second = build_chroma_index(
+        _PERSIST_DOCUMENTS, _PERSIST_EMBEDDINGS,
+        persist_path=tmp_path, model_id="test-model", dimensionality=3,
+    )
+    assert first.size == second.size == len(_PERSIST_DOCUMENTS)
+    assert first.collection.metadata["corpus_hash"] == second.collection.metadata["corpus_hash"]
+
+
+def test_persisted_chroma_rebuilds_and_logs_when_corpus_hash_changes(tmp_path, caplog):
+    import logging
+
+    build_chroma_index(
+        _PERSIST_DOCUMENTS, _PERSIST_EMBEDDINGS,
+        persist_path=tmp_path, model_id="test-model", dimensionality=3,
+    )
+
+    changed_documents = {**_PERSIST_DOCUMENTS, "1": "a, but the corpus text changed"}
+    with caplog.at_level(logging.INFO, logger="category.chroma_store"):
+        rebuilt = build_chroma_index(
+            changed_documents, _PERSIST_EMBEDDINGS,
+            persist_path=tmp_path, model_id="test-model", dimensionality=3,
+        )
+
+    assert rebuilt.size == len(changed_documents)
+    assert any("Rebuilding Chroma index" in record.message for record in caplog.records)
+
+
+def test_persisted_chroma_requires_model_id_and_dimensionality(tmp_path):
+    with pytest.raises(ValueError):
+        build_chroma_index(_PERSIST_DOCUMENTS, _PERSIST_EMBEDDINGS, persist_path=tmp_path)
+
+
+# --------------------------------------------------------------------------- #
 # experiment.py -- ablation configs
 # --------------------------------------------------------------------------- #
 def _chips_shape_items_and_resolved():

@@ -23,6 +23,7 @@ from collections.abc import Callable
 
 from langgraph.types import Send, interrupt
 
+from src.category.chroma_store import ChromaIndex, chroma_scores
 from src.category.classifier import build_queries, classify, embedding_scores, item_component_labels
 from src.category.corpus import FoodCategory
 from src.category.embedder import GeminiEmbedder
@@ -153,16 +154,29 @@ def make_classify_node(
     embedder: GeminiEmbedder,
     eu_fip: list[dict],
     config: ExperimentConfig,
+    chroma_index: ChromaIndex | None = None,
 ) -> Callable[[dict], dict]:
     """ONE component (or the whole-label product query) per invocation --
     Send's arg REPLACES this node's input entirely, so `state` here is just
     {"query": <CategoryQuery as dict>}, never the full PipelineState.
+
+    chroma_index is None (default, settings.RETRIEVAL_STORE == "numpy") for
+    the unchanged embedding_scores/numpy path -- given (settings.
+    RETRIEVAL_STORE == "chroma", built once in src/graph/pipeline.py's
+    build_pipeline) to search that persisted index via chroma_scores
+    instead. Either way the query is still embedded via `embedder` first;
+    only what SEARCHES the corpus differs -- classify() itself never knows
+    which one produced its `scores` dict.
     """
 
     def classify_node(state: dict) -> dict:
         try:
             query = CategoryQuery.model_validate(state["query"])
-            scores = embedding_scores(embedder.embed_query(query.text), embeddings)
+            query_embedding = embedder.embed_query(query.text)
+            if chroma_index is not None:
+                scores = chroma_scores(chroma_index, query_embedding)
+            else:
+                scores = embedding_scores(query_embedding, embeddings)
             result = classify(query, scores, categories, eu_fip, config)
             key = result.component_label or PRODUCT_SCOPE_KEY
             return {"category": {key: result.model_dump(mode="json")}}
