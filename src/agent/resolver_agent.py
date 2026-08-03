@@ -15,6 +15,20 @@
 # needs search_web. The model choosing which tool fits THIS item, and how
 # many times, is the actual justification for a tool-calling loop instead
 # of a chain -- see docs/build_log.md.
+#
+# NOT PART OF THE LANGCHAIN MIGRATION -- DELIBERATELY, not an oversight.
+# src/report/narrator.py, src/category/multiquery.py, and
+# src/extractors/gemini.py are migrated behind src/text_generation.py's
+# TextGenerator/VisionGenerator Protocols; this module was investigated for
+# the same treatment and left native. Reason, in one line: GeminiLLM below
+# round-trips Gemini 3.x's thought_signature byte-identically by holding
+# the SDK's own response content across turns, and a LangChain
+# implementation built against this module's own minimal LLM Protocol
+# (LLMTurn carries name/args only, no tool_call id) would silently drop
+# every signature -- no error, a plausible proposal returned regardless,
+# only multi-turn reasoning continuity quietly degraded. See
+# docs/findings.md F-18 for the full investigation before attempting this
+# again; do not "finish the job" here without reading it first.
 """The review-queue resolver agent: a small LangGraph tool-calling loop
 (agent node <-> tool node, step-capped at MAX_STEPS) that investigates one
 unresolved/ambiguous item and either proposes an identity or declines.

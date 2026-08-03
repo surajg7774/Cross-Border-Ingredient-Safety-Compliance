@@ -3,9 +3,9 @@ build, not renumbered afterward -- some numbers below are absent (F-01,
 F-08, F-15) because those findings were merged into another entry or
 withdrawn before being written up, not because this file is incomplete.
 F-06 was briefly a duplicate (two unrelated findings shared the number);
-the second was renumbered to F-07, the first unused ID, once noticed. 14
+the second was renumbered to F-07, the first unused ID, once noticed. 15
 findings are recorded here: F-02 through F-07, F-09 through F-14, and F-16
-through F-17.
+through F-18.
 
 ### Current operating config
 
@@ -277,3 +277,64 @@ label-image model calls) for all 9 products, which costs quota this task was
 not given. Any report or figure drawn from the 9 files above should be
 treated as reflecting the pre-fix `conflicting_rows` behaviour, not current
 code.
+
+## F-18 — LangChain migration stopped at three of four call sites
+
+`src/report/narrator.py`, `src/category/multiquery.py`, and
+`src/extractors/gemini.py` (gate + extract) are migrated behind
+`src/text_generation.py`'s `TextGenerator`/`VisionGenerator` Protocols,
+selected by `settings.MODEL_BACKEND` ("native" default, "langchain"
+opt-in). `src/agent/` (the review-queue resolver) was investigated and
+DELIBERATELY left native -- not an oversight, not deferred for lack of
+time.
+
+**Reason: Gemini 3.x `thought_signature`.** The native `GeminiLLM`
+(`src/agent/resolver_agent.py`) appends the SDK's own returned
+`response.candidates[0].content` object into `self._contents` verbatim,
+so a function-call turn's `thought_signature` round-trips byte-identical
+across the multi-turn tool-calling loop. This is load-bearing, not
+incidental: Gemini 2.5+ rejects a hand-reconstructed function-call turn
+that lacks its signature -- verified directly against the live API before
+the current design (holding the raw SDK object rather than a
+reconstructed one) was relied on.
+
+`langchain-google-genai==4.3.2` DOES have a real preservation mechanism
+for this, checked in its installed source, not assumed: response parsing
+stores a function call's signature in
+`AIMessage.additional_kwargs["__gemini_function_call_thought_signatures__"]`,
+keyed on that tool call's `id` (`chat_models.py`'s response-to-message
+conversion), and re-serializing an `AIMessage.tool_calls` back into a
+request (`_parse_chat_history`) looks that map up by `id` and reattaches
+the real signature. It only works, though, if the CALLER preserves the
+real `AIMessage` (or at least its `additional_kwargs` and each tool
+call's `id`) across turns. `resolver_agent.py`'s own `LLM` Protocol
+deliberately does not: `LLMTurn.tool_calls` carries `name`/`args` only --
+no `id`, no `additional_kwargs`. A LangChain implementation built
+naturally against that existing, minimal, provider-agnostic shape (rather
+than retaining native LangChain message objects as private internal
+state, mirroring how `GeminiLLM` retains `self._contents`) would drop
+every signature.
+
+**The failure would be SILENT, not a crash.** `_parse_chat_history`
+(`chat_models.py`, the "Enforce thought signatures for new Gemini models"
+block) injects a hardcoded `DUMMY_THOUGHT_SIGNATURE` onto the first
+function-call part missing one, for any model matching
+`_is_gemini_3_or_later` -- which this project's configured agent model,
+`gemini-3.5-flash-lite`, does. That patch satisfies the API's schema
+validation, so a naive migration would not error: no exception, no log,
+a plausible-looking proposal returned every time. What degrades is
+multi-turn reasoning continuity across tool calls -- precisely the axis
+this agent exists to exercise (`resolver_agent.py`'s own DESIGN RULE:
+"the model choosing which tool fits THIS item, and how many times, is
+the actual justification for a tool-calling loop") -- and precisely what
+a mocked-response test cannot measure, since it proves response-parsing
+parity for a canned response, not reasoning-quality parity across turns.
+
+**Conclusion:** near-zero benefit (the `LLM` Protocol seam already
+provides full provider independence at the type level -- LangChain would
+add no new capability visible to `resolve_review_item()` or the LangGraph
+loop) against non-trivial, specifically undetectable risk. Stopped
+deliberately, not abandoned -- revisit only with a concrete reason to
+change the underlying provider, and re-verify the signature-handling
+story against whichever `langchain-google-genai` version is current at
+that time, not against this finding's version (`4.3.2`).

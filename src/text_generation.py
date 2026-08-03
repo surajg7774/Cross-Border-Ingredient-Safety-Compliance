@@ -1,13 +1,18 @@
 # DESIGN RULE: this is a SEPARATE module from src/model_call.py, not an
 # addition to it, so that importing it (and, transitively,
 # langchain-google-genai) stays scoped to whatever opts into it --
-# src/report/narrator.py, src/category/multiquery.py, and (as of this
-# phase) src/extractors/gemini.py, all behind the MODEL_BACKEND setting.
-# src/agent/resolver_agent.py keeps importing ONLY src/model_call.py's
-# plumbing (strip_markdown_fences, with_retry) and never sees
-# langchain-google-genai at all, even at import time -- the agent and
-# embeddings (src/category/embedder.py) are explicitly out of scope for
-# this migration, per instruction.
+# src/report/narrator.py, src/category/multiquery.py, and
+# src/extractors/gemini.py, all behind the MODEL_BACKEND setting. This is
+# the full set, not a partial migration awaiting a later phase:
+# src/agent/resolver_agent.py was investigated for the same treatment and
+# DELIBERATELY excluded, not left out for lack of time -- Gemini 3.x's
+# thought_signature does not survive a migration built against that
+# module's own minimal LLM Protocol without silently degrading multi-turn
+# tool-calling reasoning; see docs/findings.md F-18 for the full
+# investigation and resolver_agent.py's own top-of-file note. Embeddings
+# (src/category/embedder.py) remain out of scope on unrelated grounds --
+# embeddings stay on Gemini, per instruction, not a langchain question at
+# all.
 """Two Protocols for the two request shapes every direct google-genai call
 site in this project needs, each with two implementations:
 
