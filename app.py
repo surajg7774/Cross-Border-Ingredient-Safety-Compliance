@@ -23,6 +23,11 @@
 # every widget interaction would be both slow and wrong. This state machine
 # is deliberately the same shape LangGraph's interrupt/resume would produce,
 # so the backend can be swapped later without the screens changing.
+#
+# (Superseded: the ~0.46 recall@1 figure above is from an earlier-round
+# measurement. The operating config -- with-component-name -- measures
+# recall@1 = 0.53, recall@3 = 0.82, MRR = 0.66; see docs/findings.md
+# F-06/F-07/F-13/F-14 and docs/build_log.md:466.)
 """Streamlit UI for the EU additive compliance checker.
 
     uv run streamlit run app.py
@@ -55,6 +60,7 @@ from src.horizon.lane import find_horizon_signals
 from src.horizon.load import load_horizon_meta, load_horizon_signals
 from src.horizon.schemas import HorizonResult
 from src.pipeline import run_extraction
+from src.reference_data import load_eu_fip
 from src.report.email import EmailAttachment, SmtpConfig, send_report, test_connection
 from src.report.export import ReportIdentity, to_csv, to_json, to_pdf
 from src.report.narrator import Narration, narrate
@@ -73,7 +79,7 @@ from src.ui.styles import CUSTOM_CSS
 # see src/category/experiment.py. CONFIGS["best"] is the project's own
 # already-measured combination of the two wins from that ablation (product
 # queries get the description, component queries get their own name; see
-# docs/findings.md F-06 and experiment.py's comment on "best"). Since this
+# docs/findings.md F-07 and experiment.py's comment on "best"). Since this
 # UI collects a description specifically to improve category matching, the
 # only config that honours that field at all is "best" -- using "baseline"
 # here would silently discard what the user typed.
@@ -99,7 +105,7 @@ def _load_json(path: Path, default):
 
 @st.cache_resource(show_spinner=False)
 def _load_references() -> ReferenceData:
-    eu_fip = _load_json(settings.REFERENCE_DIR / "eu_fip.json", [])
+    eu_fip = load_eu_fip(settings.REFERENCE_DIR / "eu_fip.json")
     codex_ins = _load_json(settings.REFERENCE_DIR / "codex_ins.json", [])
     functional_classes = _load_json(settings.REFERENCE_DIR / "functional_classes.json", [])
     label_aliases = _load_json(settings.REFERENCE_DIR / "label_aliases.json", {})
@@ -710,7 +716,7 @@ def _run_pipeline_from_text(text: str, description: str) -> None:
         # (src/category/classifier.py's _build_query), while user_description
         # is scoped to product-only under CONFIGS["best"] -- putting it here
         # instead would leak it into every component query, the exact
-        # measured regression F-06 in docs/findings.md documents.
+        # measured regression F-07 in docs/findings.md documents.
         gate = GateResult(
             is_food_label=True,
             has_ingredients_declaration=True,
@@ -910,7 +916,7 @@ def render_category_confirmation() -> None:
     st.markdown("### Confirm the food category")
     st.markdown(
         "<p class='eu-lede'>Automatic category matching selects the correct category first "
-        "only about half the time (measured recall@1 ≈ 46%), and the food category determines "
+        "about half the time, and the food category determines "
         "the verdict. Confirm each one below before the compliance verdict is computed.</p>",
         unsafe_allow_html=True,
     )

@@ -1,6 +1,7 @@
 """Tests for src/substitutes/advisor.py -- hand-built dicts, no fixture
 files, no API calls."""
 
+from src.reference_data import clean_eu_fip_rows
 from src.rules.schemas import CategoryVerdict, ItemVerdict, ProductVerdict
 from src.substitutes.advisor import _SUBTYPE_FLAG, find_substitutes
 
@@ -311,3 +312,30 @@ def test_worked_example_calcium_carbonate_candidate_for_titanium_dioxide():
     result = find_substitutes(verdict, eu_fip, codex_ins)
     ids = {c.eu_canonical_id for c in result.suggestions[0].candidates}
     assert "170" in ids
+
+
+def test_placeholder_only_conditions_renders_no_numbered_clause():
+    # MEASURED bug: advisor.py reads eu_fip rows directly and does not
+    # normalize them itself (by design -- it must not import
+    # src.rules.engine, see this module's own DESIGN RULE comment), so a
+    # "&nbsp;"-only conditions cell used to reach the substitutes UI/PDF/
+    # narrator verbatim. The fix lives at the data layer
+    # (src.reference_data.clean_eu_fip_rows, applied wherever eu_fip.json
+    # is loaded into memory) -- advisor.py itself is UNCHANGED. This test
+    # runs the fixture through that same cleaning step, exactly as
+    # load_eu_fip does for a real file, before handing it to
+    # find_substitutes -- proving the candidate that reaches
+    # src/ui/components.py's render_substitutes (and the PDF/narrator
+    # paths) never carries the placeholder, so nothing -- numbered or
+    # otherwise -- can render from it.
+    blocked = _item(1, eu_canonical_id="160a(i)", by_category=[_category_verdict("14.1.4")])
+    verdict = _verdict([blocked], blocking=[1])
+    raw_eu_fip = [_row("133", "14.1.4 Flavoured drinks", conditions="&nbsp;", additive_name="Brilliant Blue FCF")]
+    codex_ins = [_codex("160a(i)", ["Colour"]), _codex("133", ["Colour"])]
+
+    eu_fip = clean_eu_fip_rows(raw_eu_fip)
+    result = find_substitutes(verdict, eu_fip, codex_ins)
+
+    candidates = result.suggestions[0].candidates
+    assert len(candidates) == 1
+    assert candidates[0].conditions is None

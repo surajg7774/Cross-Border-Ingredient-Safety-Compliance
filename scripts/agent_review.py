@@ -54,6 +54,7 @@ from config import settings
 from src.agent.resolver_agent import AgentProposal, make_gemini_llm, resolve_review_item
 from src.agent.tools import AgentRefs, build_tools
 from src.logging_setup import setup_run_log
+from src.reference_data import load_eu_fip
 
 console = Console()
 
@@ -252,7 +253,7 @@ def main(
         raise typer.Exit(1)
 
     model_id = model or settings.SECONDARY_MODEL
-    eu_fip = _load_json(settings.REFERENCE_DIR / "eu_fip.json", [])
+    eu_fip = load_eu_fip(settings.REFERENCE_DIR / "eu_fip.json")
     codex_ins = _load_json(settings.REFERENCE_DIR / "codex_ins.json", [])
     label_aliases = _load_json(settings.REFERENCE_DIR / "label_aliases.json", {})
 

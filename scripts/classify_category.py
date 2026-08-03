@@ -54,6 +54,7 @@ from src.category.experiment import CONFIGS, ExperimentConfig
 from src.category.multiquery import generate_paraphrases
 from src.category.tfidf import build_tfidf_index, tfidf_mean_pairwise_similarity, tfidf_scores
 from src.logging_setup import setup_run_log
+from src.reference_data import load_eu_fip
 from src.resolve.schemas import ResolvedItem
 
 console = Console()
@@ -346,7 +347,7 @@ def main(
         )
     config = CONFIGS[config_name]
 
-    eu_fip = _load_json(settings.REFERENCE_DIR / "eu_fip.json", [])
+    eu_fip = load_eu_fip(settings.REFERENCE_DIR / "eu_fip.json")
     codex_ins = _load_json(settings.REFERENCE_DIR / "codex_ins.json", [])
     descriptions = _load_json(DESCRIPTIONS_PATH, {})
     categories, documents = _load_corpus(config, eu_fip, codex_ins)

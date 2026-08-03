@@ -22,6 +22,7 @@ from rich.table import Table
 
 from config import settings
 from src.logging_setup import setup_run_log
+from src.reference_data import load_eu_fip
 from src.resolve.resolver import References, resolve_items
 
 console = Console()
@@ -59,7 +60,7 @@ def _load_references() -> References:
         codex_ins=_load_json(codex_ins_path, []),
         functional_classes=_load_json(functional_classes_path, []),
         label_aliases=_load_json(label_aliases_path, {}),
-        eu_fip=_load_json(eu_fip_path, []),
+        eu_fip=load_eu_fip(eu_fip_path),
         index_version=_index_version(
             [codex_ins_path, functional_classes_path, label_aliases_path, eu_fip_path]
         ),

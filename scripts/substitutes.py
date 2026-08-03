@@ -24,6 +24,7 @@ from rich.table import Table
 
 from config import settings
 from src.logging_setup import setup_run_log
+from src.reference_data import load_eu_fip
 from src.rules.schemas import ProductVerdict
 from src.substitutes.advisor import find_substitutes
 
@@ -140,7 +141,7 @@ def main(
             console.print(f"Log: {log_path}")
         raise typer.Exit(1)
 
-    eu_fip = _load_json(settings.REFERENCE_DIR / "eu_fip.json", [])
+    eu_fip = load_eu_fip(settings.REFERENCE_DIR / "eu_fip.json")
     codex_ins = _load_json(settings.REFERENCE_DIR / "codex_ins.json", [])
 
     if all_files:

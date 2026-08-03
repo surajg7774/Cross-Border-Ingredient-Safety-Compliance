@@ -359,7 +359,7 @@ def test_short_category_name_none_passthrough():
 def test_verdict_label_plain_english_wording():
     assert _verdict_label("permitted_with_conditions") == ("Allowed — conditions to check", "permitted")
     assert _verdict_label("not_permitted_in_category") == ("Not allowed in this kind of food", "blocked")
-    assert _verdict_label("not_authorised_eu") == ("Not allowed in the EU", "blocked")
+    assert _verdict_label("not_authorised_eu") == ("Not authorised in the EU", "blocked")
     assert _verdict_label("permitted_qs") == ("Allowed — no fixed limit", "permitted")
 
 

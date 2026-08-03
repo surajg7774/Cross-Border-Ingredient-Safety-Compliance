@@ -24,7 +24,16 @@ import streamlit as st
 # verdict strings themselves are UNCHANGED -- they are what the JSON export
 # writes (verdict.model_dump()) and what every other module compares
 # against; only this display mapping changed. Never "banned" -- the EU
-# verdict is "not authorised as a food additive in the EU".
+# verdict is "not authorised as a food additive in the EU" (src/report/
+# narrator.py:65 hardcodes this same rule for the LLM narration, and
+# src/report/export.py's own _VERDICT_LABELS follows it too -- "Not
+# allowed in the EU" here previously contradicted both).
+#
+# FOLLOW-UP, not done here: this is the THIRD independent verdict-string ->
+# label mapping in the codebase (src/report/export.py has its own, and
+# narrator.py hardcodes the not_authorised_eu phrase in its prompt) -- the
+# three are free to drift, exactly as this one just did. Centralizing them
+# into one shared mapping is out of scope for this fix.
 _VERDICT_BUCKETS: dict[str, str] = {
     "permitted_qs": "permitted",
     "permitted_with_limit": "permitted",
@@ -36,7 +45,7 @@ _VERDICT_LABELS: dict[str, str] = {
     "permitted_qs": "Allowed — no fixed limit",
     "permitted_with_conditions": "Allowed — conditions to check",
     "not_permitted_in_category": "Not allowed in this kind of food",
-    "not_authorised_eu": "Not allowed in the EU",
+    "not_authorised_eu": "Not authorised in the EU",
 }
 
 

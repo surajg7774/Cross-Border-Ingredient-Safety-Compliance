@@ -54,6 +54,7 @@ from src.graph.nodes import (
 )
 from src.graph.state import PipelineState
 from src.horizon.load import load_horizon_meta, load_horizon_signals
+from src.reference_data import load_eu_fip
 from src.resolve.resolver import References
 
 # Same operating config app.py's own category classifier uses (see app.py's
@@ -86,7 +87,7 @@ class PipelineReferences:
 
 
 def _load_pipeline_references() -> PipelineReferences:
-    eu_fip = _load_json(settings.REFERENCE_DIR / "eu_fip.json", [])
+    eu_fip = load_eu_fip(settings.REFERENCE_DIR / "eu_fip.json")
     codex_ins = _load_json(settings.REFERENCE_DIR / "codex_ins.json", [])
     functional_classes = _load_json(settings.REFERENCE_DIR / "functional_classes.json", [])
     label_aliases = _load_json(settings.REFERENCE_DIR / "label_aliases.json", {})

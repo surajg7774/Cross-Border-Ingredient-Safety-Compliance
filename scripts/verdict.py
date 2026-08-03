@@ -27,6 +27,7 @@ from src.category.classifier import item_component_labels
 from src.category.corpus import parse_food_categories
 from src.category.schemas import CategoryCandidate, CategoryResult
 from src.logging_setup import setup_run_log
+from src.reference_data import load_eu_fip
 from src.resolve.schemas import ResolvedItem
 from src.rules.engine import evaluate
 from src.rules.schemas import ItemVerdict
@@ -305,7 +306,7 @@ def main(
             "single resolution file path instead if you meant one product.[/yellow]"
         )
 
-    eu_fip = _load_json(settings.REFERENCE_DIR / "eu_fip.json", [])
+    eu_fip = load_eu_fip(settings.REFERENCE_DIR / "eu_fip.json")
     overrides = {}
     if category:
         overrides = _parse_category_overrides(category, _load_category_names())

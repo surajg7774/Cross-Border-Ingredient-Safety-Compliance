@@ -42,6 +42,7 @@ from src.category.corpus import build_corpus
 from src.category.embedder import DIMENSIONALITY, GeminiEmbedder, _cache_key
 from src.category.experiment import CONFIGS
 from src.logging_setup import setup_run_log
+from src.reference_data import load_eu_fip
 
 console = Console()
 
@@ -218,7 +219,7 @@ def main(
     config = CONFIGS[config_name]
 
     raw_categories = _load_json(settings.REFERENCE_DIR / "food_categories.json", [])
-    eu_fip = _load_json(settings.REFERENCE_DIR / "eu_fip.json", [])
+    eu_fip = load_eu_fip(settings.REFERENCE_DIR / "eu_fip.json")
     codex_ins = _load_json(settings.REFERENCE_DIR / "codex_ins.json", [])
     categories, documents, _flags = build_corpus(raw_categories, config, eu_fip, codex_ins)
     model_id = settings.EMBEDDING_MODEL
