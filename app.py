@@ -164,7 +164,7 @@ def _get_extractor() -> GeminiExtractor:
 # to pause the state machine, and _finalise_graph resumes it. See
 # docs/build_log.md for why (measured category recall@1 ~0.53).
 # =========================================================================== #
-@st.cache_resource(show_spinner="Loading the LangGraph pipeline…")
+@st.cache_resource(show_spinner="Reading the label, resolving identities, and retrieving categories…")
 def _get_graph():
     """Built ONCE per server process and cached -- st.cache_resource returns
     the SAME compiled graph (and therefore the SAME InMemorySaver) on every
@@ -189,8 +189,8 @@ def _graph_fallback(exc: Exception) -> None:
     st.session_state.graph_broken = True
     st.session_state.pop("graph_config", None)
     st.warning(
-        "The LangGraph-backed pipeline hit a problem and this run is using the direct "
-        f"pipeline instead: {exc}"
+        "Something went wrong with the primary screening process, so this run is using the "
+        f"backup process instead: {exc}"
     )
 
 
@@ -905,6 +905,9 @@ def _merge_preview_candidates(authoritative: ProductVerdict, preview: ProductVer
 
 
 def render_category_confirmation() -> None:
+    # Same spacer div the results screen's own nav row uses (below the top
+    # of the page, not flush against it) -- see render_results.
+    st.markdown("<div class='eu-nav-row'></div>", unsafe_allow_html=True)
     if st.button("← Back", key="back_to_input"):
         # Returns to the input screen WITHOUT clearing extraction/resolution/
         # category_results -- nothing here re-runs extraction; this is a
@@ -1057,8 +1060,9 @@ def _recompute_verdict_after_resolution_change() -> None:
     verdict.items' own by_category/flags, not re-asked of the user), plus
     substitutes/horizon. Narration is deliberately NOT re-generated here --
     unlike evaluate()/find_substitutes()/find_horizon_signals(), it costs a
-    real model call, and the deterministic verdict.summary shown above it
-    is already refreshed; see docs/build_log.md."""
+    real model call, and every OTHER deterministic display (the count
+    strip, the page header's category summary, the item sections) is
+    already refreshed from the new verdict; see docs/build_log.md."""
     refs = _load_references()
     resolved_items = st.session_state.resolution.items
     resolved_by_id = {r.item_id: r for r in resolved_items}
@@ -1353,9 +1357,20 @@ def render_results() -> None:
 
     # The narration -- prominent, above the item sections. Rendered via
     # plain st.markdown (Streamlit's own markdown parser, safe by default,
-    # no unsafe_allow_html). It does not replace verdict.summary below it:
-    # that deterministic text (src/rules/engine.py's own words) is still
-    # shown verbatim, per the rule that it is never rewritten.
+    # no unsafe_allow_html). There is deliberately no separate rendering of
+    # verdict.summary (src/rules/engine.py's own deterministic words) below
+    # this: the item counts it states are the count strip just below
+    # (render_count_strip), which category was used is the page header
+    # above (identity.category), its two caveats (dosage, category
+    # confirmation) are re-derived in CODE, not prose, just below the count
+    # strip (components.render_verdict_caveats -- never dependent on
+    # narration succeeding), and narrate() ITSELF falls back to
+    # verdict.summary verbatim, unmodified, as narration.summary on ANY
+    # model failure (see src/report/narrator.py's own docstring) -- so
+    # nothing verdict.summary said is ever lost, only no longer duplicated
+    # ON TOP of itself when narration succeeds. The caption below is what
+    # actually tells a reader which case (real narration vs. fallback)
+    # they are looking at.
     st.markdown(narration.summary)
     # narration.detail is topic -> list of short sentences (a JSON object,
     # not a markdown string -- see src/report/narrator.py's Narration
@@ -1366,14 +1381,18 @@ def render_results() -> None:
         st.markdown(f"**{topic}**")
         for point in points:
             st.markdown(f"- {point}")
+    # LOAD-BEARING, small as it looks: model_id reads "unavailable" on the
+    # narrate() fallback above, "gemini-3.5-flash" (or whichever model ran)
+    # otherwise -- this caption is the ONLY visible signal distinguishing
+    # real narration from the deterministic fallback now that there is no
+    # separate verdict.summary box. A real regression was caught by this
+    # caption once already; do not remove it.
     st.caption(f"Written by {narration.model_id} from the assessment above. It adds no facts.")
     if narration.unfaithful_claims:
         st.warning(
             "The narration above contains claims NOT found in the underlying assessment: "
             + "; ".join(narration.unfaithful_claims)
         )
-
-    st.markdown(f"<p class='eu-summary'>{verdict.summary}</p>", unsafe_allow_html=True)
 
     item_dicts = [item.model_dump() for item in verdict.items]
     out_of_scope_items = [d for d in item_dicts if d["headline"] == "out_of_scope"]
@@ -1400,6 +1419,12 @@ def render_results() -> None:
     # legitimately appear in more than one place (e.g. verdict.blocking vs.
     # verdict.category_conflict) -- the strip must never double-count.
     components.render_count_strip(components.count_buckets(item_dicts))
+    # Deterministic, code-computed caveats (dosage, category confirmation) --
+    # see components._verdict_caveats for why these are not a narration
+    # prompt rule: unlike the narration above, this never reads narration
+    # at all, so it renders identically whether narration succeeded or
+    # narrate() fell back to verdict.summary.
+    components.render_verdict_caveats(item_dicts)
 
     components.render_verdict_section("Blocking", blocking_items, names, is_blocking=True)
     components.render_verdict_section("Category-dependent", conflict_items, names)

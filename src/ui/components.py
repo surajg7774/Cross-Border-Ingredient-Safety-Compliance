@@ -371,6 +371,62 @@ def render_count_strip(counts: dict[str, int]) -> None:
     st.markdown(f"<div class='eu-count-strip'>{cells}</div>", unsafe_allow_html=True)
 
 
+def _verdict_caveats(items: list[dict]) -> list[str]:
+    """The two caveats ProductVerdict.summary (src/rules/engine.py) always
+    states in prose, computed here DETERMINISTICALLY instead -- never from
+    the narration model's output. A prompt is a request, not a guarantee:
+    this project has already measured that three times (fence-stripping,
+    the four different empty-response shapes, and the category-confirmation
+    wording that only had explicit phrasing for one of its two directions).
+    A prompt rule for these two would be a fourth instance of the same
+    mistake, so this is plain code instead -- it cannot go missing because
+    a model declined to mention it, and it is exactly as present on the
+    narrate() fallback path as when narration succeeds, since it never
+    reads narration at all.
+
+    - Dosage: fires whenever ANY item's chosen category carries a real
+      numeric max_level_mg_kg -- the SAME condition src/rules/engine.py's
+      own _build_summary checks for the identical caveat in verdict.summary.
+    - Category confirmation: read directly off each item's OWN flags
+      (category_confirmed_by_user / category_unconfirmed) -- never
+      re-derived from verdict.summary's prose, so a future wording change
+      there cannot silently break this. If any item's category is
+      unconfirmed, that caveat wins over a "you confirmed it" one even when
+      other items in the same product ARE confirmed -- the uncertain case
+      is the one worth surfacing, not the reassuring one.
+    """
+    caveats = []
+
+    has_limit = any(
+        candidate.get("max_level_mg_kg") is not None
+        for item in items
+        for candidate in item.get("by_category") or []
+    )
+    if has_limit:
+        caveats.append(
+            "A label declares that a permitted-with-limit additive is present, not the dosage "
+            "actually used -- the maximum levels shown below cannot be verified from a label alone."
+        )
+
+    unconfirmed = any("category_unconfirmed" in (item.get("flags") or []) for item in items)
+    confirmed = any("category_confirmed_by_user" in (item.get("flags") or []) for item in items)
+    if unconfirmed:
+        caveats.append("The food category was retrieved automatically and has not been confirmed by you.")
+    elif confirmed:
+        caveats.append("You confirmed the food category used for this assessment.")
+
+    return caveats
+
+
+def render_verdict_caveats(items: list[dict]) -> None:
+    """Near the count strip, not inside the narration -- see
+    _verdict_caveats for why these two lines are deterministic code rather
+    than a prompt rule. Caption-styled, not a bordered box: the point is
+    that it cannot go missing, not that it is prominent."""
+    for caveat in _verdict_caveats(items):
+        st.caption(caveat)
+
+
 def _render_citation_and_conditions(top: dict | None, flags: list[str]) -> None:
     """The citation (a real link, or an explicit "no source URL" note --
     never silence), the in-force date, and the conditions -- first line

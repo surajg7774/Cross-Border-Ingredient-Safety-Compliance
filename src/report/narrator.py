@@ -60,8 +60,12 @@ verbatim, somewhere in the JSON provided.
 - Never write "banned". The correct phrasing is "not authorised as a food additive in the EU".
 - Never claim the product clears for export -- a label declares presence of an additive, not the \
 dosage actually used.
-- If an item's flags include "category_unconfirmed" (as opposed to "category_confirmed_by_user"), \
-say plainly that its food category was not confirmed by a person.
+- Write the category-confirmation state from the READER's own point of view, addressing them \
+directly as "you" -- the reader IS the person who would have confirmed it, never a third party. \
+If an item's flags include "category_confirmed_by_user", say plainly that YOU confirmed its food \
+category (e.g. "you confirmed this food category"). If instead its flags include \
+"category_unconfirmed", say plainly that its food category was not confirmed by you. Never write \
+"a person" or "a user" for this.
 - Every item already carries its best available display name in "additive_name", already including \
 its code where one applies (e.g. "Fast Green FCF (INS 143)", "Silicon dioxide" for an item whose \
 eu_canonical_id you should show separately as E<id>) -- use the name exactly as given, and always \

@@ -92,14 +92,6 @@ a:hover { text-decoration-color: var(--ink); }
 
 /* ---- lede / help text ----------------------------------------------- */
 .eu-lede { color: var(--muted); font-size: 0.95rem; max-width: 62ch; margin: 0.25rem 0 1.5rem; }
-.eu-summary {
-    font-size: 1rem;
-    padding: 0.85rem 1rem;
-    border: 1px solid var(--rule);
-    border-left: 3px solid var(--ink);
-    background: transparent;
-    margin: 0.5rem 0 2rem;
-}
 .eu-caption { color: var(--muted); font-size: 0.82rem; }
 
 /* ---- product identity block -------------------------------------------*/

@@ -13,6 +13,7 @@ from src.ui.components import (
     _primary_candidate,
     _short_category_name,
     _substitute_flag_label,
+    _verdict_caveats,
     _verdict_label,
     count_buckets,
     verdict_strip_html,
@@ -332,6 +333,59 @@ def test_count_buckets_are_mutually_exclusive_and_sum_to_item_total():
 
 def test_count_buckets_empty_list_sums_to_zero():
     assert sum(count_buckets([]).values()) == 0
+
+
+def _item_with_flags(flags, by_category=None):
+    return {"by_category": by_category or [], "flags": flags}
+
+
+def test_verdict_caveats_dosage_fires_when_any_max_level_present():
+    items = [_item_with_flags([], [_candidate("12.2.2", "permitted_with_limit", max_level_mg_kg=20000.0)])]
+    caveats = _verdict_caveats(items)
+    assert any("dosage" in c.lower() for c in caveats)
+
+
+def test_verdict_caveats_dosage_absent_when_no_item_has_a_level():
+    items = [_item_with_flags([], [_candidate("12.2.2", "permitted_qs")])]
+    assert _verdict_caveats(items) == []
+
+
+def test_verdict_caveats_unconfirmed_wins_over_confirmed_when_mixed():
+    # This app always confirms every category before computing a verdict at
+    # all (see count_buckets' own docstring), so a genuine mix should not
+    # occur in practice -- but the function must still resolve it safely,
+    # and the uncertain case is the one worth surfacing, not the reassuring
+    # one, so "not confirmed" wins if both flags appear anywhere.
+    items = [
+        _item_with_flags(["category_confirmed_by_user"]),
+        _item_with_flags(["category_unconfirmed"]),
+    ]
+    caveats = _verdict_caveats(items)
+    assert any("not been confirmed" in c for c in caveats)
+    assert not any("you confirmed" in c.lower() for c in caveats)
+
+
+def test_verdict_caveats_confirmed_when_no_item_is_unconfirmed():
+    items = [_item_with_flags(["category_confirmed_by_user"])]
+    caveats = _verdict_caveats(items)
+    assert any("you confirmed" in c.lower() for c in caveats)
+
+
+def test_verdict_caveats_empty_when_nothing_applies():
+    assert _verdict_caveats([]) == []
+    assert _verdict_caveats([_item_with_flags([])]) == []
+
+
+def test_verdict_caveats_never_reads_narration():
+    # THE property tests/test_app_ui.py's AppTest-based tests prove end to
+    # end: _verdict_caveats takes item dicts only, no narration parameter
+    # exists to pass one, so its output cannot depend on whether narrate()
+    # succeeded or fell back -- a prompt is a request, not a guarantee, and
+    # this is deterministic code instead. Locked in here at the signature
+    # level: calling it twice with the SAME items, nothing else in scope,
+    # must be idempotent.
+    items = [_item_with_flags([], [_candidate("3", "permitted_with_limit", max_level_mg_kg=100.0)])]
+    assert _verdict_caveats(items) == _verdict_caveats(items)
 
 
 def test_short_category_name_strips_trailing_legal_citation():
