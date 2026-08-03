@@ -863,6 +863,36 @@ it is a `src/rules/engine.py` behaviour change outside this task's scope,
 not something to fix by touching `_dedupe_rows`'s key. Left unchanged, as
 instructed.
 
+> **SUPERSEDED (2026-08-04).** The conclusion above -- that `_select_row`
+> picks one representative row on a same-status tie and does not merge or
+> combine clauses, left unchanged as an out-of-scope behaviour change -- was
+> overturned in a later turn. That later turn has no dedicated build_log
+> entry of its own; it is referenced only in passing, at this file's line
+> ~1002, item E of "## 2026-08-02 -- Narration rendering, verdict-strip
+> clarity, conditions context" ("tolerating the numbered-clause prefix the
+> previous turn's `multiple_provisions_apply` merge can produce"). The
+> rewrite itself is evidenced by current code, not by a build_log writeup.
+>
+> Current behaviour (`src/rules/row_selection.py`'s `select_row`, extracted
+> from `src/rules/engine.py` and shared with `src/substitutes/advisor.py`):
+> when every surviving row for an (additive, category) lookup agrees on
+> STATUS -- the case investigated here -- the rows are MERGED, not
+> tie-broken: every distinct `conditions` text is concatenated and numbered,
+> the lowest numeric level is kept, note codes are unioned, and the item is
+> flagged `multiple_provisions_apply: N` instead of `conflicting_rows`. The
+> old single-row, most-restrictive-wins tie-break is now used ONLY for a
+> genuine STATUS disagreement (one row permitted, another prohibited) --
+> which is not what any of the three items investigated above are.
+>
+> Re-run directly against current code: all three named items --
+> E330, E440, and E224 in Khusmain 14.1.4 -- are same-status, two-or-more-row
+> cases, and all three now MERGE (`multiple_provisions_apply: 2`,
+> `multiple_provisions_apply: 2`, and `multiple_provisions_apply: 4`
+> respectively), not `conflicting_rows`. The stored
+> `data/outputs/verdict/Khusmain.json` still shows the OLD `conflicting_rows`
+> output described above -- it predates this fix and was not regenerated
+> (see `docs/findings.md`'s stale-verdict-outputs note).
+
 ### Tests
 
 - `tests/test_export.py`: +7 (CSV component column, CSV identity comment

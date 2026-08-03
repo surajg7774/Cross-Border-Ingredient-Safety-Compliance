@@ -14,6 +14,8 @@ import re
 
 from src.category.schemas import CategoryResult
 from src.resolve.schemas import ResolvedItem
+from src.rules.row_selection import normalize_row as _normalize_row
+from src.rules.row_selection import select_row as _select_row
 from src.rules.schemas import CategoryVerdict, ItemVerdict, ProductVerdict
 
 # Classifications that are structurally not Annex II additives at all --
@@ -42,20 +44,13 @@ _LETTER_SUFFIX_RE = re.compile(r"[a-z]$", re.IGNORECASE)
 # once a row like this is merged and numbered alongside a real clause (see
 # eu_fip.json's ('150c', '14.2.1') pair: "1) &nbsp;\n\n2) only ..."). Every
 # row is normalized once here, at ingestion, so every later truthiness
-# check on row["conditions"] (`_merge_conditions`, `_verdict_from_row`,
-# `_restrictiveness_key`) is correct without special-casing.
-_BLANK_MARKER_RE = re.compile(r"&nbsp;|\xa0", re.IGNORECASE)
-
-
-def _has_condition_text(text: str) -> bool:
-    return bool(_BLANK_MARKER_RE.sub("", text).strip())
-
-
-def _normalize_row(row: dict) -> dict:
-    conditions = row.get("conditions")
-    if conditions and not _has_condition_text(conditions):
-        return {**row, "conditions": None}
-    return row
+# check on row["conditions"] (src.rules.row_selection's `_merge_conditions`,
+# `_restrictiveness_key`, and this module's own `_verdict_from_row`) is
+# correct without special-casing. `_normalize_row`/`_select_row` themselves
+# live in src.rules.row_selection now (imported above) -- shared with
+# src/substitutes/advisor.py's independent row selection, since a fix to
+# this algorithm previously had to be applied twice by hand and drifted
+# (see that module's DESIGN RULE comment).
 
 
 def _category_code(food_category_raw: str | None) -> str:
@@ -105,124 +100,6 @@ def _build_indices(eu_fip: list[dict]) -> tuple[dict[tuple[str, str], list[dict]
         if code:
             by_id_category.setdefault((canonical_id, code), []).append(row)
     return by_id_category, by_id
-
-
-def _restrictiveness_key(row: dict) -> tuple:
-    """Sort key for the MOST restrictive of several conflicting rows for the
-    same (additive, category): prohibited beats permitted; a numeric cap
-    beats none, and a lower cap beats a higher one; conditions text beats
-    a blanket gmp permission.
-    """
-    status_rank = 0 if row["status"] == "prohibited" else 1
-    if row.get("max_level_mg_kg") is not None:
-        level_rank, level_value = 0, row["max_level_mg_kg"]
-    else:
-        level_rank, level_value = 1, float("inf")
-    conditions_rank = 0 if row.get("conditions") else 1
-    return (status_rank, level_rank, level_value, conditions_rank)
-
-
-def _dedupe_rows(rows: list[dict]) -> list[dict]:
-    """Collapse EXACT duplicate rows -- same additive, category, status,
-    level, and conditions recorded more than once."""
-    seen: dict[tuple, dict] = {}
-    for row in rows:
-        key = (
-            row["canonical_id"],
-            row["food_category_raw"],
-            row["status"],
-            row.get("max_level_mg_kg"),
-            row.get("conditions"),
-        )
-        seen.setdefault(key, row)
-    return list(seen.values())
-
-
-def _merge_levels(rows: list[dict]) -> tuple[float | None, str | None]:
-    """(max_level_mg_kg, max_level_basis) across several rows: the MINIMUM
-    (most restrictive) non-null level, with the basis that came with it --
-    None/first-row's-basis if every row is unbounded (quantum satis /
-    conditions-only). Levels are numeric and directly comparable, so
-    "most restrictive wins" is exact here in a way it can never be for
-    prose (see _merge_conditions)."""
-    leveled = [row for row in rows if row.get("max_level_mg_kg") is not None]
-    if not leveled:
-        return None, rows[0].get("max_level_basis")
-    winner = min(leveled, key=lambda row: row["max_level_mg_kg"])
-    return winner["max_level_mg_kg"], winner.get("max_level_basis")
-
-
-def _merge_conditions(rows: list[dict]) -> str | None:
-    """Every DISTINCT conditions text across several rows, concatenated and
-    numbered when there is more than one -- never a choice between them.
-    Unlike a numeric level, one clause of prose is not "more restrictive"
-    than another; both can be true and both must be shown, or a manufacturer
-    reads a compliance report as clearing a condition it never checked."""
-    distinct = list(dict.fromkeys(row["conditions"] for row in rows if row.get("conditions")))
-    if not distinct:
-        return None
-    if len(distinct) == 1:
-        return distinct[0]
-    return "\n\n".join(f"{i}) {text}" for i, text in enumerate(distinct, start=1))
-
-
-def _merge_note_codes(rows: list[dict]) -> list[str]:
-    codes: list[str] = []
-    seen: set[str] = set()
-    for row in rows:
-        for code in row.get("note_codes") or []:
-            if code not in seen:
-                seen.add(code)
-                codes.append(code)
-    return codes
-
-
-def _select_row(rows: list[dict]) -> tuple[dict, list[str]]:
-    """Returns (row, flags) for one (additive, category) lookup.
-
-    Most eu_fip (additive, category) pairs have exactly one row after
-    dedup. When more than one survives, MEASURED (see docs/build_log.md's
-    conflicting_rows investigation, Khusmain/E330): this is overwhelmingly
-    a genuine structural pattern, not noisy data -- EU FIP frequently
-    splits ONE legal permission ("Group I, Additives" in a category) into
-    several rows, one per distinct restriction clause that applies
-    simultaneously (131 of 134 Group I permissions in category 14.1.4
-    carry the exact same two-clause pair, verbatim). Picking one row as
-    "the" answer silently discarded whichever clause lost the tie-break --
-    a compliance report that drops an applicable condition is wrong, not
-    merely incomplete.
-
-    So: when every surviving row agrees on STATUS (the common case, both
-    permitted, just differently conditioned), they are MERGED -- the most
-    restrictive numeric level, but every distinct conditions text, note
-    code, kept. Flagged "multiple_provisions_apply: N" so a reader knows
-    more than one clause was combined.
-
-    A genuine STATUS disagreement (one row permitted, another prohibited)
-    is a different kind of conflict -- not co-applicable provisions but an
-    unresolved contradiction in the source data -- and keeps the old
-    single-row, most-restrictive-wins behaviour (prohibited always wins),
-    flagged "conflicting_rows" exactly as before: there is no sensible way
-    to "merge" a permission with a ban.
-    """
-    deduped = _dedupe_rows(rows)
-    if len(deduped) == 1:
-        return deduped[0], []
-
-    if len({row["status"] for row in deduped}) > 1:
-        return min(deduped, key=_restrictiveness_key), ["conflicting_rows"]
-
-    level, basis = _merge_levels(deduped)
-    merged = {
-        "status": deduped[0]["status"],
-        "max_level_mg_kg": level,
-        "max_level_basis": basis,
-        "conditions": _merge_conditions(deduped),
-        "note_codes": _merge_note_codes(deduped),
-        "source_url": deduped[0].get("source_url"),
-        "effective_date": deduped[0].get("effective_date"),
-    }
-    return merged, [f"multiple_provisions_apply: {len(deduped)}"]
 
 
 def _verdict_from_row(row: dict) -> str:

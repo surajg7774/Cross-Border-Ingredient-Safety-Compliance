@@ -314,6 +314,39 @@ def test_worked_example_calcium_carbonate_candidate_for_titanium_dioxide():
     assert "170" in ids
 
 
+def test_two_row_candidate_merges_conditions_and_flags_multiple_provisions():
+    # MEASURED bug: advisor.py's row selection used to duplicate engine.py's
+    # OLD single-row, most-restrictive-wins behaviour and was never updated
+    # when engine.py was fixed to merge co-applicable rows instead -- 7 of
+    # 19 real substitute candidates in data/outputs/substitutes/ have 2+
+    # eu_fip rows for their (id, category), and the second clause was
+    # silently discarded on every one. Both rows below are "permitted" (no
+    # status conflict), same shape as the real E551/12.1.2 case -- so this
+    # must MERGE, exactly as src.rules.engine does for a category verdict,
+    # not pick one and drop the other.
+    blocked = _item(1, eu_canonical_id="160a(i)", by_category=[_category_verdict("14.1.4")])
+    verdict = _verdict([blocked], blocking=[1])
+    eu_fip = [
+        _row(
+            "133", "14.1.4 Flavoured drinks",
+            max_level_mg_kg=300.0, conditions="from 1 February 2014", additive_name="Brilliant Blue FCF",
+        ),
+        _row(
+            "133", "14.1.4 Flavoured drinks",
+            max_level_mg_kg=300.0, conditions="until 31 January 2014", additive_name="Brilliant Blue FCF",
+        ),
+    ]
+    codex_ins = [_codex("160a(i)", ["Colour"]), _codex("133", ["Colour"])]
+    result = find_substitutes(verdict, eu_fip, codex_ins)
+    candidates = result.suggestions[0].candidates
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.additive_name == "Brilliant Blue FCF"
+    assert candidate.conditions == "1) from 1 February 2014\n\n2) until 31 January 2014"
+    assert "multiple_provisions_apply: 2" in candidate.flags
+    assert "conflicting_rows" not in candidate.flags
+
+
 def test_placeholder_only_conditions_renders_no_numbered_clause():
     # MEASURED bug: advisor.py reads eu_fip rows directly and does not
     # normalize them itself (by design -- it must not import

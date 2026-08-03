@@ -3,8 +3,9 @@ build, not renumbered afterward -- some numbers below are absent (F-01,
 F-08, F-15) because those findings were merged into another entry or
 withdrawn before being written up, not because this file is incomplete.
 F-06 was briefly a duplicate (two unrelated findings shared the number);
-the second was renumbered to F-07, the first unused ID, once noticed. 13
-findings are recorded here: F-02 through F-07, F-09 through F-14, and F-16.
+the second was renumbered to F-07, the first unused ID, once noticed. 14
+findings are recorded here: F-02 through F-07, F-09 through F-14, and F-16
+through F-17.
 
 ### Current operating config
 
@@ -242,3 +243,37 @@ Wrong and declined are reported separately and never combined into a single
 accuracy figure. A wrong proposal is dangerous because the human reviewer may
 accept it; a decline only leaves work undone. Proposals are advisory — a
 human confirms before any resolution is applied.
+
+## F-17 — 9 of 13 stored verdict outputs predate the row-merge fix
+
+`src/rules/engine.py`'s row selection was fixed to MERGE co-applicable eu_fip
+rows (distinct conditions concatenated and numbered, lowest level kept,
+flagged `multiple_provisions_apply: N`) instead of silently picking one and
+discarding the rest, flagged `conflicting_rows` (see `docs/build_log.md`
+Section J and its SUPERSEDED note). The fix is live in
+`src/rules/row_selection.py`, shared with `src/substitutes/advisor.py`.
+
+Checked every file already on disk against this: 9 of the 13 files in
+`data/outputs/verdict/` were generated before the fix and still carry the
+old `conflicting_rows` behaviour on 16 item-level flags that current code
+would render as `multiple_provisions_apply` with merged clauses instead.
+The 9 stale files:
+
+    Chipsmain.json
+    Chipsraw.json
+    Chocolateraw.json
+    E143test.json
+    EU_productmain.json
+    Khusmain.json
+    Mixed.json
+    Noodlesraw.json
+    Pepsimain.json
+
+(4 files were regenerated after the fix and are current: `Chocolatemain.json`,
+`GraphTestChips.json`, `Ice-creammain.json`, `Parle-Gmain.json`.)
+
+Not regenerated: doing so requires re-running extraction (and therefore
+label-image model calls) for all 9 products, which costs quota this task was
+not given. Any report or figure drawn from the 9 files above should be
+treated as reflecting the pre-fix `conflicting_rows` behaviour, not current
+code.

@@ -1,11 +1,19 @@
 # DESIGN RULE: pure decision logic -- data in, data out. No file reads, no
 # printing, no settings access. Reference data (eu_fip, codex_ins) is passed
-# in as arguments. Imports only src.substitutes.schemas and
-# src.rules.schemas -- never src.extract/, src.category/, src.resolve.resolver,
-# or src.rules.engine. Because src.rules.engine is off limits, a handful of
-# its small pure helpers (parent-code stripping, category-code extraction,
-# most-restrictive-row selection, the row-to-verdict mapping) are duplicated
-# below rather than imported -- same logic, independent module.
+# in as arguments. Imports only src.substitutes.schemas, src.rules.schemas,
+# and src.rules.row_selection -- never src.extract/, src.category/,
+# src.resolve.resolver, or src.rules.engine. Because src.rules.engine is off
+# limits, a handful of its small pure helpers (parent-code stripping,
+# category-code extraction, the row-to-verdict mapping) are duplicated below
+# rather than imported -- same logic, independent module. Row SELECTION
+# (what happens when several eu_fip rows apply to the same additive+category)
+# is NOT duplicated, after the duplicate copy here fell out of sync with
+# engine.py's: engine.py was fixed to merge co-applicable rows instead of
+# silently discarding all but one, and this module's independent copy was
+# never updated to match. It is imported from src.rules.row_selection
+# instead -- a third module, alongside src.rules.schemas, that belongs to no
+# pipeline stage (see that module's own DESIGN RULE comment); importing it
+# is not the same as importing src.rules.engine.
 """Substitute-additive advisor: for every item that BLOCKS export, propose
 replacement candidates that would clear. Deterministic -- a filtered query
 over eu_fip and codex_ins, no LLM, no retrieval, no network.
@@ -22,6 +30,7 @@ recommendation.
 
 import re
 
+from src.rules.row_selection import select_row as _select_row
 from src.rules.schemas import ItemVerdict, ProductVerdict
 from src.substitutes.schemas import SubstituteCandidate, SubstituteResult, SubstituteSuggestion
 
@@ -80,37 +89,6 @@ def _verdict_from_row(row: dict) -> str:
     if row.get("max_level_mg_kg") is not None:
         return "permitted_with_limit"
     return "permitted_qs"
-
-
-def _dedupe_rows(rows: list[dict]) -> list[dict]:
-    seen: dict[tuple, dict] = {}
-    for row in rows:
-        key = (
-            row["canonical_id"],
-            row["food_category_raw"],
-            row["status"],
-            row.get("max_level_mg_kg"),
-            row.get("conditions"),
-        )
-        seen.setdefault(key, row)
-    return list(seen.values())
-
-
-def _restrictiveness_key(row: dict) -> tuple:
-    if row.get("max_level_mg_kg") is not None:
-        level_rank, level_value = 0, row["max_level_mg_kg"]
-    else:
-        level_rank, level_value = 1, float("inf")
-    conditions_rank = 0 if row.get("conditions") else 1
-    return (level_rank, level_value, conditions_rank)
-
-
-def _select_row(rows: list[dict]) -> dict:
-    """The most restrictive of possibly several conflicting rows for the
-    same (additive, category) -- a candidate is only as good as its worst
-    disclosed condition, same reasoning as engine.py's _select_row."""
-    deduped = _dedupe_rows(rows)
-    return min(deduped, key=_restrictiveness_key)
 
 
 def _rows_by_id(eu_fip: list[dict]) -> dict[str, list[dict]]:
@@ -299,7 +277,14 @@ def _find_candidates(
         if not shared:  # rule 1: must share at least one functional class
             continue
 
-        chosen_row = _select_row(rows)
+        # Same algorithm engine.py uses for a category verdict: when 2+
+        # eu_fip rows apply to this (candidate, category), MERGE their
+        # distinct conditions texts (numbered) and take the lowest level,
+        # rather than silently picking one and discarding the rest -- see
+        # src.rules.row_selection.select_row. The merged row carries no
+        # "additive_name" key (not needed there; every input row already
+        # shares one), so that field is read from `rows`, not `chosen_row`.
+        chosen_row, select_flags = _select_row(rows)
         candidate_level = chosen_row.get("max_level_mg_kg")
         # rule 3: candidate level must be >= the blocked additive's, where
         # both are known. A None candidate level is quantum satis --
@@ -308,7 +293,7 @@ def _find_candidates(
         if blocked_max_level is not None and candidate_level is not None and candidate_level < blocked_max_level:
             continue
 
-        flags = []
+        flags = list(select_flags)
         if candidate_id in _AZO_COLOURS_REQUIRING_WARNING and blocked_id not in _AZO_COLOURS_REQUIRING_WARNING:
             flags.append(_LABELLING_FLAG)  # rule 4: flagged and ranked last, never excluded
         if inherited:
@@ -319,7 +304,7 @@ def _find_candidates(
         candidates.append(
             SubstituteCandidate(
                 eu_canonical_id=candidate_id,
-                additive_name=chosen_row.get("additive_name"),
+                additive_name=rows[0].get("additive_name"),
                 shared_functional_classes=shared,
                 fcs_code=fcs_code,
                 verdict=_verdict_from_row(chosen_row),
