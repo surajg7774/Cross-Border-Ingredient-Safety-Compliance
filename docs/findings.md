@@ -1,3 +1,18 @@
+Finding IDs (F-NN) were assigned chronologically as they came up during the
+build, not renumbered afterward -- some numbers below are absent (F-01,
+F-08, F-15) because those findings were merged into another entry or
+withdrawn before being written up, not because this file is incomplete.
+F-06 was briefly a duplicate (two unrelated findings shared the number);
+the second was renumbered to F-07, the first unused ID, once noticed. 13
+findings are recorded here: F-02 through F-07, F-09 through F-14, and F-16.
+
+### Current operating config
+
+**recall@1 = 0.53, recall@3 = 0.82, MRR = 0.66**, `with-component-name`
+-- established by F-13/F-14, below. Earlier figures elsewhere in this file
+(≈0.60 at F-06, ≈0.46 at F-09) are superseded rounds, retained for the
+record, not the current number.
+
 ## F-02 — FAO blocks automated GSFA access
 403 + robots.txt Disallow /*?id=*. Switched to the official CXG 36-1989 PDF.
 Better source: one versioned document, citable revision date, no rate limits.
@@ -28,7 +43,7 @@ Similarity scores compressed into 0.61–0.70; correct 0.66 vs wrong 0.67.
 Intersection filter marked the CORRECT category "not permitted" on Chips,
 Parle-G and Ice-cream Outer — under investigation.
 
-## F-06 — Category retrieval: query text matters more than retrieval method
+## F-07 — Category retrieval: query text matters more than retrieval method
 Diagnostic: mean pairwise cosine similarity across 155 unrelated category
 documents = 0.7847; rank-1 to rank-10 gap on a real query = 0.0335.
 Hypothesis: given that compression, TF-IDF might match or beat embeddings.
@@ -103,7 +118,7 @@ Decision: automated ingestion was attempted and abandoned. The horizon lane
 documented as future work requiring an E-number-to-CAS crosswalk.
 
 ## F-13 — Corpus reformatting refuted; the compression metric is not a proxy
-Hypothesis (motivated by F-06's 0.7847 mean pairwise similarity across 155
+Hypothesis (motivated by F-07's 0.7847 mean pairwise similarity across 155
 unrelated documents): the EU regulatory descriptions dilute retrieval
 signal, and the category name alone would separate better.
 
@@ -133,10 +148,10 @@ generic functional classes like "flavour enhancer" are common across
 categories and add shared vocabulary rather than distinguishing text) but
 scored no worse than plain baseline on recall@3. Mean pairwise similarity
 is therefore not a valid proxy for retrieval quality; prior reasoning that
-treated 0.78 as "the ceiling" (F-06) was unsound.
+treated 0.78 as "the ceiling" (F-07) was unsound.
 
 Decision: corpus_mode stays "full" (its existing default); with-component-
-name remains the operating config (F-06). strip-framing's small gain is
+name remains the operating config (F-07). strip-framing's small gain is
 within noise at n=17 and far short of with-component-name either way — not
 pursued further without a larger truth set.
 
@@ -164,7 +179,7 @@ or diversification displaces candidates the intersection filter would have
 promoted anyway.
 
 **Hybrid RRF declined.** Motivation was that `include_component_name` gave
-+0.17 on BOTH dense and sparse retrieval (F-06), suggesting literal token
++0.17 on BOTH dense and sparse retrieval (F-07), suggesting literal token
 overlap carries signal the dense retriever misses. In practice TF-IDF's
 standalone 0.24 is too weak to fuse productively with a 0.82 ranking. At
 n=17, −0.06 is one label-component and is within noise, but it moved down in
@@ -179,7 +194,7 @@ pairs and `query_variants` is correctly populated on the seven processed
 labels — but it is not scored. Left as open work; the seven cached labels make
 a follow-up run cheaper.
 
-### Conclusion across F-06, F-13 and F-14
+### Conclusion across F-06, F-07, F-13 and F-14
 
 Four retrieval methods (embedding, TF-IDF, ChromaDB, hybrid), seven corpus
 constructions, and two diversification/fusion strategies have been measured

@@ -11,6 +11,7 @@ collision here would silently produce meaningless similarity scores.
 
 import hashlib
 import json
+import logging
 import time
 
 import numpy as np
@@ -18,6 +19,8 @@ from google import genai
 from google.genai import errors
 
 from config import settings
+
+log = logging.getLogger("category.embedder")
 
 DIMENSIONALITY = 768
 MAX_BATCH_SIZE = 100  # the API's own BatchEmbedContentsRequest limit
@@ -36,7 +39,26 @@ RETRYABLE_STATUS_CODES = {429, 500, 503}
 _CACHE_PATH = settings.REFERENCE_DIR / "category_embeddings.json"
 
 
-def _cache_key(text: str, model_id: str, dimensionality: int) -> str:
+def _cache_key(text: str, model_id: str, dimensionality: int, task_type: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(text.encode("utf-8"))
+    digest.update(model_id.encode("utf-8"))
+    digest.update(str(dimensionality).encode("utf-8"))
+    digest.update(task_type.encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _legacy_cache_key(text: str, model_id: str, dimensionality: int) -> str:
+    """The PRE-task_type key format -- task_type was not hashed, so an
+    embed_documents (RETRIEVAL_DOCUMENT) and an embed_query (RETRIEVAL_QUERY)
+    call for the identical text collided under this key. MEASURED: checked
+    every real query/paraphrase text ever run against every corpus document
+    text across every corpus_mode ever exercised -- zero actual collisions
+    (document text always contains " -- ", query text never does), so
+    nothing already cached under this format needs to be distrusted. Kept
+    ONLY as a read fallback so ~800 already-cached vectors stay usable
+    without re-embedding under quota; every new write uses _cache_key above.
+    """
     digest = hashlib.sha256()
     digest.update(text.encode("utf-8"))
     digest.update(model_id.encode("utf-8"))
@@ -82,11 +104,22 @@ class GeminiEmbedder:
         results: dict[str, list[float]] = {}
         to_fetch: dict[str, str] = {}
         for key, text in texts.items():
-            cache_key = _cache_key(text, self.model_id, DIMENSIONALITY)
+            cache_key = _cache_key(text, self.model_id, DIMENSIONALITY, task_type)
             if cache_key in cache:
                 results[key] = cache[cache_key]
-            else:
-                to_fetch[key] = text
+                continue
+            legacy_key = _legacy_cache_key(text, self.model_id, DIMENSIONALITY)
+            if legacy_key in cache:
+                log.warning(
+                    "embedding cache hit on the legacy (task_type-less) key for %r "
+                    "(task_type=%s) -- re-embed under the current key to pick up a "
+                    "task-type-specific vector once quota allows",
+                    text[:80],
+                    task_type,
+                )
+                results[key] = cache[legacy_key]
+                continue
+            to_fetch[key] = text
 
         if to_fetch:
             keys = list(to_fetch.keys())
@@ -94,7 +127,7 @@ class GeminiEmbedder:
             for key, vector in zip(keys, vectors, strict=True):
                 normalised = _normalise(vector)
                 results[key] = normalised
-                cache[_cache_key(to_fetch[key], self.model_id, DIMENSIONALITY)] = normalised
+                cache[_cache_key(to_fetch[key], self.model_id, DIMENSIONALITY, task_type)] = normalised
             _save_cache(cache)
 
         return results

@@ -463,7 +463,7 @@ awareness of which backend produced them.
 
 ### Why
 
-Category recall@1 is measured at 0.53. Across F-06, F-13, and F-14, four
+Category recall@1 is measured at 0.53. Across F-06, F-07, F-13, and F-14, four
 retrieval methods, seven corpus constructions, and two fusion strategies
 were measured against ground truth and none beat the operating config.
 Human confirmation of the food category is therefore a design requirement,

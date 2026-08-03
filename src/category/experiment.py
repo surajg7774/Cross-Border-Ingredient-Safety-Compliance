@@ -162,7 +162,7 @@ CONFIGS: dict[str, ExperimentConfig] = {
     ),
     # Retrieval-strategy experiments -- all default OFF (mmr_lambda=None,
     # multi_query=0, hybrid=False), paired with include_component_name
-    # since that is the operating config (F-06) -- testing a new strategy
+    # since that is the operating config (F-07) -- testing a new strategy
     # against a weaker base would confuse the comparison.
     "mmr-0.7": ExperimentConfig(name="mmr-0.7", mmr_lambda=0.7, include_component_name=True),
     "mmr-0.5": ExperimentConfig(name="mmr-0.5", mmr_lambda=0.5, include_component_name=True),

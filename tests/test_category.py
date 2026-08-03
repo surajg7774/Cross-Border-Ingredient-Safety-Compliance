@@ -18,7 +18,7 @@ from src.category.classifier import (
     top_k,
 )
 from src.category.corpus import build_corpus, parse_food_categories, validate_corpus
-from src.category.embedder import _cache_key
+from src.category.embedder import _cache_key, _legacy_cache_key
 from src.category.experiment import CONFIGS, ExperimentConfig
 from src.category.filter import permitted_in
 from src.category.schemas import CategoryQuery
@@ -885,6 +885,29 @@ def test_cache_key_changes_with_model_id():
     # gemini-embedding-001 and gemini-embedding-2 have incompatible embedding
     # spaces -- the model id MUST be part of the cache key, or a later model
     # swap would silently reuse stale vectors from a different space.
-    key_a = _cache_key("some category text", "gemini-embedding-001", 768)
-    key_b = _cache_key("some category text", "gemini-embedding-2", 768)
+    key_a = _cache_key("some category text", "gemini-embedding-001", 768, "RETRIEVAL_DOCUMENT")
+    key_b = _cache_key("some category text", "gemini-embedding-2", 768, "RETRIEVAL_DOCUMENT")
     assert key_a != key_b
+
+
+def test_cache_key_changes_with_task_type():
+    # MEASURED bug: task_type was not part of the key, so identical text
+    # embedded as a RETRIEVAL_DOCUMENT and as a RETRIEVAL_QUERY collided --
+    # whichever ran first silently won. The two task types must produce
+    # distinct cache entries for the same text/model/dimensionality.
+    document_key = _cache_key("some category text", "gemini-embedding-001", 768, "RETRIEVAL_DOCUMENT")
+    query_key = _cache_key("some category text", "gemini-embedding-001", 768, "RETRIEVAL_QUERY")
+    assert document_key != query_key
+
+
+def test_legacy_cache_key_omits_task_type_and_matches_pre_fix_format():
+    # The legacy key is what every entry already on disk in
+    # data/reference/category_embeddings.json was written under, before
+    # task_type was added -- it must stay stable (task_type-less) so those
+    # ~800 already-cached vectors remain readable as a fallback.
+    assert _legacy_cache_key("some category text", "gemini-embedding-001", 768) == _legacy_cache_key(
+        "some category text", "gemini-embedding-001", 768
+    )
+    assert _legacy_cache_key("some category text", "gemini-embedding-001", 768) != _cache_key(
+        "some category text", "gemini-embedding-001", 768, "RETRIEVAL_DOCUMENT"
+    )

@@ -34,7 +34,10 @@ def _normalise_code(raw_code: str) -> str:
     string normalisation, not resolution logic, so duplicating it keeps
     src/agent/ independent of src/resolve/'s internals, the same
     independence every other stage boundary in this project already keeps;
-    see e.g. src/report/narrator.py's own duplicated _strip_markdown_fences)."""
+    see e.g. src/category/multiquery.py's own duplicated disk-cache-key
+    construction (deliberately not shared with src/category/embedder.py's --
+    see src/model_call.py's docstring on why fence-stripping/retry moved to
+    a shared module but caching did not)."""
     text = raw_code.lower().replace(" ", "")
     if text.startswith("ins"):
         return text[3:]

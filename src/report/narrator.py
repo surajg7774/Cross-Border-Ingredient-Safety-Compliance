@@ -27,22 +27,14 @@ a report must always be producible without the model.
 
 import json
 import re
-import time
 
-from google import genai
-from google.genai import errors
 from pydantic import BaseModel
 
-from config import settings
 from src.horizon.schemas import HorizonResult
+from src.model_call import strip_markdown_fences
 from src.rules.schemas import ProductVerdict
 from src.substitutes.schemas import SubstituteResult
-
-MAX_RATE_LIMIT_RETRIES = 5
-INITIAL_BACKOFF_SECONDS = 2.0
-# Same retryable set as src/extractors/gemini.py: 429 = rate limited,
-# 500/503 = transient server-side overload.
-RETRYABLE_STATUS_CODES = {429, 500, 503}
+from src.text_generation import get_text_generator
 
 # Matches "E551", "E 551", "E160a", "E1105(i)" -- group(1) is the bare code
 # with the "E" prefix stripped, for comparison against eu_canonical_id
@@ -146,25 +138,6 @@ class Narration(BaseModel):
     unfaithful_claims: list[str]
 
 
-class _EmptyResponseError(RuntimeError):
-    """Raised when the model returns no text -- blocked or truncated, not a crash."""
-
-
-def _strip_markdown_fences(text: str | None) -> str:
-    """Remove ```json / ``` fences a model added despite being told not to
-    -- identical in behaviour to src/extractors/gemini.py's helper of the
-    same name, duplicated here since this module must not import that one
-    (see the DESIGN RULE comment above: narrate() answers to no other
-    stage)."""
-    if not text:
-        return ""
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else ""
-        text = text.removesuffix("```").strip()
-    return text
-
-
 def _coerce_detail(raw: object) -> dict[str, list[str]]:
     """Validate/normalise the model's "detail" value into topic ->
     list-of-sentences. Raises if the TOP level isn't a JSON object at all
@@ -196,32 +169,13 @@ def _build_prompt(verdict: ProductVerdict, substitutes: SubstituteResult, horizo
 
 
 def _call_model(prompt: str, model_id: str) -> str:
-    """Call the model once, retrying with exponential backoff on transient
-    errors -- the same retry/backoff shape as src/extractors/gemini.py's
-    GeminiExtractor._call_model, reproduced here (not imported) since this
-    module must stay independent of the extraction stage's code, exactly
-    as it must stay independent of every other stage's code."""
-    client = genai.Client(api_key=settings.GOOGLE_API_KEY)
-    delay = INITIAL_BACKOFF_SECONDS
-    for attempt in range(MAX_RATE_LIMIT_RETRIES):
-        try:
-            response = client.models.generate_content(model=model_id, contents=[prompt])
-            if response.text is None:
-                finish_reason = None
-                if response.candidates:
-                    finish_reason = response.candidates[0].finish_reason
-                raise _EmptyResponseError(
-                    f"model returned no text (finish_reason={finish_reason}, "
-                    f"prompt_feedback={response.prompt_feedback})"
-                )
-            return response.text
-        except errors.APIError as exc:
-            if exc.code in RETRYABLE_STATUS_CODES and attempt < MAX_RATE_LIMIT_RETRIES - 1:
-                time.sleep(delay)
-                delay *= 2
-                continue
-            raise
-    raise RuntimeError("unreachable")
+    """Delegates to whichever src.text_generation.TextGenerator
+    settings.MODEL_BACKEND selects -- "native" (default, the exact
+    google-genai call path this function used inline before) or
+    "langchain" (opt-in). See src/text_generation.py's module docstring
+    for the retry policy, and for what the langchain backend cannot fully
+    reproduce."""
+    return get_text_generator().complete(prompt, model_id)
 
 
 def _faithfulness_check(
@@ -274,7 +228,7 @@ def narrate(
     prompt = _build_prompt(verdict, substitutes, horizon)
     try:
         raw = _call_model(prompt, model_id)
-        data = json.loads(_strip_markdown_fences(raw))
+        data = json.loads(strip_markdown_fences(raw))
         summary = str(data["summary"])
         detail = _coerce_detail(data["detail"])
     except Exception:  # noqa: BLE001 -- ANY failure (network, rate limit, bad JSON, missing key, wrong

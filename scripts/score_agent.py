@@ -48,8 +48,8 @@ def _load_json(path: Path, default=None):
 def _normalise_ins(code: str | None) -> str | None:
     """Same normalisation src/agent/tools.py's _normalise_code applies --
     duplicated for the same stage-independence reason every other small
-    helper in this project is (see e.g. src/report/narrator.py's own
-    duplicated _strip_markdown_fences)."""
+    helper in this project is (see e.g. src/category/multiquery.py's own
+    duplicated disk-cache-key construction)."""
     if code is None:
         return None
     text = code.lower().replace(" ", "")

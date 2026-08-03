@@ -40,7 +40,6 @@ whether or not it set declined itself (see _parse_proposal).
 """
 
 import json
-import time
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, TypedDict
 
@@ -48,12 +47,14 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
 from src.agent.tools import ToolSpec
+from src.model_call import retry_delay_seconds, strip_markdown_fences, with_retry
 
 MAX_STEPS = 5
 MAX_RATE_LIMIT_RETRIES = 5
 INITIAL_BACKOFF_SECONDS = 2.0
 # Added to the server's own RetryInfo.retryDelay before sleeping -- a small
-# safety margin, not a guess at the delay itself (see _retry_delay_seconds).
+# safety margin, not a guess at the delay itself (see
+# src/model_call.py's retry_delay_seconds).
 RETRY_DELAY_MARGIN_SECONDS = 1.0
 # Same retryable set as src/extractors/gemini.py and src/report/narrator.py:
 # 429 = rate limited, 500/503 = transient server-side overload.
@@ -98,37 +99,11 @@ class LLM(Protocol):
         ...
 
 
-def _retry_delay_seconds(exc) -> float | None:
-    """The server's own explicit wait time from a 429's RetryInfo detail --
-    identical logic to src/extractors/gemini.py's helper of the same name,
-    duplicated rather than imported (see GeminiLLM's own docstring on why
-    its retry/backoff is a duplicate, not a shared import). See that
-    module's docstring for the measured incident and the exact error shape
-    this parses (exc.details["error"]["details"] -- a list of typed detail
-    objects, one of which may be {"@type": ".../RetryInfo", "retryDelay":
-    "49s"})."""
-    details = getattr(exc, "details", None)
-    if not isinstance(details, dict):
-        return None
-    error = details.get("error", details)
-    for detail in error.get("details") or []:
-        if not isinstance(detail, dict):
-            continue
-        if str(detail.get("@type", "")).endswith("RetryInfo"):
-            raw = detail.get("retryDelay")
-            if isinstance(raw, str) and raw.endswith("s"):
-                try:
-                    return float(raw[:-1])
-                except ValueError:
-                    return None
-    return None
-
-
 class GeminiLLM:
     """LLM backed by google.genai's native function calling. Retry/backoff
-    mirrors src/extractors/gemini.py's own _call_model -- duplicated, not
-    imported, per this project's stage-independence convention (see e.g.
-    src/report/narrator.py's own duplicated retry loop).
+    is src/model_call.py's shared with_retry, called with this class's own
+    tuning constants -- the loop shape is shared, the tuning is not (see
+    that module's docstring).
 
     Holds conversation state (self._contents) across start()/
     send_tool_results() calls for ONE resolve_review_item() run -- start()
@@ -183,28 +158,16 @@ class GeminiLLM:
         return self._call()
 
     def _call(self) -> LLMTurn:
-        from google.genai import errors
-
-        delay = INITIAL_BACKOFF_SECONDS
-        response = None
-        for attempt in range(MAX_RATE_LIMIT_RETRIES):
-            try:
-                response = self._client.models.generate_content(
-                    model=self.model_id, contents=self._contents, config=self._config
-                )
-                break
-            except errors.APIError as exc:
-                if exc.code in RETRYABLE_STATUS_CODES and attempt < MAX_RATE_LIMIT_RETRIES - 1:
-                    retry_delay = _retry_delay_seconds(exc)
-                    if retry_delay is not None:
-                        time.sleep(retry_delay + RETRY_DELAY_MARGIN_SECONDS)
-                    else:
-                        time.sleep(delay)
-                        delay *= 2
-                    continue
-                raise
-        if response is None:
-            raise RuntimeError("unreachable")
+        response = with_retry(
+            lambda: self._client.models.generate_content(
+                model=self.model_id, contents=self._contents, config=self._config
+            ),
+            max_retries=MAX_RATE_LIMIT_RETRIES,
+            initial_backoff_seconds=INITIAL_BACKOFF_SECONDS,
+            retryable_status_codes=RETRYABLE_STATUS_CODES,
+            retry_delay_fn=retry_delay_seconds,
+            retry_delay_margin_seconds=RETRY_DELAY_MARGIN_SECONDS,
+        )
 
         self.resolved_model_id = getattr(response, "model_version", None) or self.resolved_model_id
 
@@ -228,14 +191,6 @@ def make_gemini_llm(model_id: str, tools: dict[str, ToolSpec]) -> GeminiLLM:
 # =========================================================================== #
 # proposal parsing -- empty evidence is invalid, declining is a success
 # =========================================================================== #
-def _strip_fences(text: str | None) -> str:
-    if not text:
-        return ""
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else ""
-        text = text.removesuffix("```").strip()
-    return text
 
 
 def _declined_dict(reason: str, reasoning: str = "") -> dict:
@@ -260,7 +215,7 @@ def _parse_proposal(text: str | None, tool_calls_trace: list[dict]) -> dict:
         return _declined_dict("model produced no final answer")
 
     try:
-        raw = json.loads(_strip_fences(text))
+        raw = json.loads(strip_markdown_fences(text))
     except json.JSONDecodeError:
         return _declined_dict("final answer was not valid JSON")
     if not isinstance(raw, dict):

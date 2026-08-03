@@ -39,7 +39,7 @@ from config import settings
 from scripts.score_category import EXPERIMENTS_CSV_HEADER
 from src.category.classifier import cosine_similarity
 from src.category.corpus import build_corpus
-from src.category.embedder import DIMENSIONALITY, GeminiEmbedder, _cache_key
+from src.category.embedder import DIMENSIONALITY, GeminiEmbedder, _cache_key, _legacy_cache_key
 from src.category.experiment import CONFIGS
 from src.logging_setup import setup_run_log
 from src.reference_data import load_eu_fip
@@ -63,14 +63,23 @@ def _cache_hit_miss_counts(documents: dict[str, str], cache: dict, model_id: str
     """(hits, misses) against the ON-DISK cache, checked BEFORE embedding --
     a stale hit here would mean two different document texts collapsed onto
     the same cache key (they cannot: the key is sha256(text + model_id +
-    dimensionality), so any text change changes the key) or that this
-    config's text is byte-for-byte identical to one already embedded (only
-    "full" vs itself, never a genuinely different corpus_mode). A first run
-    of a NEW config must show misses close to len(documents); a repeat run
-    of the SAME config must show hits close to len(documents) -- print both
-    so that is directly checkable, not assumed.
+    dimensionality + task_type), so any text change changes the key) or
+    that this config's text is byte-for-byte identical to one already
+    embedded (only "full" vs itself, never a genuinely different
+    corpus_mode). A first run of a NEW config must show misses close to
+    len(documents); a repeat run of the SAME config must show hits close to
+    len(documents) -- print both so that is directly checkable, not
+    assumed. Documents are always embedded RETRIEVAL_DOCUMENT (see
+    GeminiEmbedder.embed_documents); a legacy (pre-task_type) key hit counts
+    too -- that is a real hit from the app's own point of view, GeminiEmbedder
+    falls back to it the same way.
     """
-    hits = sum(1 for text in documents.values() if _cache_key(text, model_id, DIMENSIONALITY) in cache)
+    hits = sum(
+        1
+        for text in documents.values()
+        if _cache_key(text, model_id, DIMENSIONALITY, "RETRIEVAL_DOCUMENT") in cache
+        or _legacy_cache_key(text, model_id, DIMENSIONALITY) in cache
+    )
     return hits, len(documents) - hits
 
 

@@ -1,6 +1,7 @@
 """Application settings, loaded from environment variables / .env."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,6 +20,12 @@ class Settings(BaseSettings):
     PRIMARY_MODEL: str
     SECONDARY_MODEL: str
     EMBEDDING_MODEL: str = "gemini-embedding-001"
+    # Which src/text_generation.py TextGenerator implementation
+    # src/report/narrator.py calls -- "native" (google-genai directly,
+    # unchanged default behaviour) or "langchain" (ChatGoogleGenerativeAI,
+    # same retry policy/model IDs, opt-in). See src/text_generation.py's
+    # module docstring for what "langchain" cannot reproduce.
+    MODEL_BACKEND: Literal["native", "langchain"] = "native"
     CACHE_DIR: Path = Path(".cache")
     OUTPUT_DIR: Path = Path("data/outputs")
     EXTRACTION_OUTPUT_DIR: Path = OUTPUT_DIR / "extraction"

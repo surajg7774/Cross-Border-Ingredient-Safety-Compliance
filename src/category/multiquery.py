@@ -16,12 +16,11 @@ generates and caches the paraphrases.
 
 import hashlib
 import json
-import time
 
 from google import genai
-from google.genai import errors
 
 from config import settings
+from src.model_call import strip_markdown_fences, with_retry
 
 MAX_RATE_LIMIT_RETRIES = 5
 INITIAL_BACKOFF_SECONDS = 2.0
@@ -69,38 +68,27 @@ def _save_cache(cache: dict[str, list[str]]) -> None:
     _CACHE_PATH.write_text(json.dumps(cache, indent=2), encoding="utf-8")
 
 
-def _strip_markdown_fences(text: str) -> str:
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else ""
-        text = text.removesuffix("```").strip()
-    return text
-
-
 def _call_model(prompt: str, model_id: str) -> str:
     """Call the model once, retrying with exponential backoff on transient
-    errors -- the same retry/backoff shape as src/extractors/gemini.py's
-    GeminiExtractor._call_model, reproduced here (not imported) so this
-    module stays independent, the same reasoning src/report/narrator.py's
-    own _call_model gives for its own duplicate of this block."""
+    errors -- see src/model_call.py's with_retry. No retry_delay_fn: plain
+    exponential only, exactly as before consolidation."""
     client = genai.Client(api_key=settings.GOOGLE_API_KEY)
-    delay = INITIAL_BACKOFF_SECONDS
-    for attempt in range(MAX_RATE_LIMIT_RETRIES):
-        try:
-            response = client.models.generate_content(model=model_id, contents=[prompt])
-            if response.text is None:
-                finish_reason = None
-                if response.candidates:
-                    finish_reason = response.candidates[0].finish_reason
-                raise EmptyResponseError(f"model returned no text (finish_reason={finish_reason})")
-            return response.text
-        except errors.APIError as exc:
-            if exc.code in RETRYABLE_STATUS_CODES and attempt < MAX_RATE_LIMIT_RETRIES - 1:
-                time.sleep(delay)
-                delay *= 2
-                continue
-            raise
-    raise RuntimeError("unreachable")
+
+    def _call() -> str:
+        response = client.models.generate_content(model=model_id, contents=[prompt])
+        if response.text is None:
+            finish_reason = None
+            if response.candidates:
+                finish_reason = response.candidates[0].finish_reason
+            raise EmptyResponseError(f"model returned no text (finish_reason={finish_reason})")
+        return response.text
+
+    return with_retry(
+        _call,
+        max_retries=MAX_RATE_LIMIT_RETRIES,
+        initial_backoff_seconds=INITIAL_BACKOFF_SECONDS,
+        retryable_status_codes=RETRYABLE_STATUS_CODES,
+    )
 
 
 def generate_paraphrases(query_text: str, n: int, model_id: str) -> list[str]:
@@ -120,7 +108,7 @@ def generate_paraphrases(query_text: str, n: int, model_id: str) -> list[str]:
 
     prompt = _PROMPT.format(n=n - 1, text=query_text)
     raw = _call_model(prompt, model_id)
-    parsed = json.loads(_strip_markdown_fences(raw))
+    parsed = json.loads(strip_markdown_fences(raw))
     if not isinstance(parsed, list):
         raise TypeError(f"expected a JSON array of paraphrases, got {type(parsed).__name__}: {raw!r}")
     paraphrases = [str(p) for p in parsed][: n - 1]

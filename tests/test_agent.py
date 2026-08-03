@@ -14,7 +14,6 @@ from unittest.mock import Mock
 
 from google.genai import errors
 
-import src.agent.resolver_agent as resolver_agent_module
 from src.agent.resolver_agent import (
     INITIAL_BACKOFF_SECONDS,
     MAX_STEPS,
@@ -308,7 +307,7 @@ def test_gemini_llm_429_with_retry_delay_sleeps_that_duration(monkeypatch):
         fake_response,
     ]
     sleep_calls: list[float] = []
-    monkeypatch.setattr(resolver_agent_module.time, "sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setattr("src.model_call.time.sleep", lambda s: sleep_calls.append(s))
 
     turn = llm.start("prompt")
 
@@ -325,7 +324,7 @@ def test_gemini_llm_429_without_retry_delay_falls_back_to_exponential_backoff(mo
         fake_response,
     ]
     sleep_calls: list[float] = []
-    monkeypatch.setattr(resolver_agent_module.time, "sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setattr("src.model_call.time.sleep", lambda s: sleep_calls.append(s))
 
     turn = llm.start("prompt")
 

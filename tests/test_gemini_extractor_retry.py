@@ -1,4 +1,9 @@
-"""Tests for src/extractors/gemini.py's rate-limit retry behaviour.
+"""Tests for src/extractors/gemini.py's GeminiExtractor wiring its own
+tuning constants into src/model_call.py's shared retry policy correctly.
+The retry LOOP itself (exponential backoff, RetryInfo handling) is tested
+directly in tests/test_model_call.py -- these tests only prove
+GeminiExtractor._call_model is wired to it right, end to end through a
+mocked API client.
 
 MEASURED: a 429 (GenerateRequestsPerMinutePerProjectPerModel-FreeTier)
 carries an explicit RetryInfo.retryDelay the server wants respected --
@@ -14,7 +19,6 @@ from src.extractors.gemini import (
     INITIAL_BACKOFF_SECONDS,
     RETRY_DELAY_MARGIN_SECONDS,
     GeminiExtractor,
-    _retry_delay_seconds,
 )
 
 
@@ -23,17 +27,6 @@ def _fake_api_error(code: int, retry_delay: str | None = None) -> errors.APIErro
     if retry_delay is not None:
         details.append({"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": retry_delay})
     return errors.APIError(code, {"error": {"code": code, "status": "RESOURCE_EXHAUSTED", "details": details}})
-
-
-def test_retry_delay_seconds_parses_the_real_error_shape():
-    # The exact shape captured from a live 429 during development.
-    exc = _fake_api_error(429, "19.376064879s")
-    assert _retry_delay_seconds(exc) == 19.376064879
-
-
-def test_retry_delay_seconds_is_none_without_retry_info():
-    exc = _fake_api_error(500)
-    assert _retry_delay_seconds(exc) is None
 
 
 def _extractor_with_mocked_client(monkeypatch) -> GeminiExtractor:
@@ -51,7 +44,7 @@ def test_429_with_retry_delay_sleeps_that_duration(monkeypatch):
         fake_response,
     ]
     sleep_calls: list[float] = []
-    monkeypatch.setattr(gemini_module.time, "sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setattr("src.model_call.time.sleep", lambda s: sleep_calls.append(s))
 
     result = extractor._call_model(b"fake-bytes", "prompt")
 
@@ -67,7 +60,7 @@ def test_429_without_retry_delay_falls_back_to_exponential_backoff(monkeypatch):
         fake_response,
     ]
     sleep_calls: list[float] = []
-    monkeypatch.setattr(gemini_module.time, "sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setattr("src.model_call.time.sleep", lambda s: sleep_calls.append(s))
 
     result = extractor._call_model(b"fake-bytes", "prompt")
 
