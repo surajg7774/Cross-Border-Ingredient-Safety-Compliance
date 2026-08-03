@@ -35,6 +35,28 @@ _MEASURED_CATEGORY_RECALL_AT_1 = 0.46
 _PAREN_SUFFIX_RE = re.compile(r"\([^)]*\)$")
 _LETTER_SUFFIX_RE = re.compile(r"[a-z]$", re.IGNORECASE)
 
+# eu_fip source rows sometimes carry a literal HTML "&nbsp;" entity (or a
+# real non-breaking-space character) as a scraped placeholder for an empty
+# conditions cell -- truthy as a Python string, but MEASURED to render as
+# an empty markdown ordered-list item ("2)" with nothing visible after it)
+# once a row like this is merged and numbered alongside a real clause (see
+# eu_fip.json's ('150c', '14.2.1') pair: "1) &nbsp;\n\n2) only ..."). Every
+# row is normalized once here, at ingestion, so every later truthiness
+# check on row["conditions"] (`_merge_conditions`, `_verdict_from_row`,
+# `_restrictiveness_key`) is correct without special-casing.
+_BLANK_MARKER_RE = re.compile(r"&nbsp;|\xa0", re.IGNORECASE)
+
+
+def _has_condition_text(text: str) -> bool:
+    return bool(_BLANK_MARKER_RE.sub("", text).strip())
+
+
+def _normalize_row(row: dict) -> dict:
+    conditions = row.get("conditions")
+    if conditions and not _has_condition_text(conditions):
+        return {**row, "conditions": None}
+    return row
+
 
 def _category_code(food_category_raw: str | None) -> str:
     """"12.2.2 Seasonings and condiments" -> "12.2.2". A few rows have a
@@ -76,6 +98,7 @@ def _build_indices(eu_fip: list[dict]) -> tuple[dict[tuple[str, str], list[dict]
     by_id_category: dict[tuple[str, str], list[dict]] = {}
     by_id: dict[str, list[dict]] = {}
     for row in eu_fip:
+        row = _normalize_row(row)
         canonical_id = row["canonical_id"]
         by_id.setdefault(canonical_id, []).append(row)
         code = _category_code(row.get("food_category_raw"))

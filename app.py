@@ -1149,35 +1149,133 @@ def _reject_agent_proposal(item_id: int) -> None:
     st.session_state.agent_decisions[item_id] = "rejected"
 
 
-def _render_agent_proposal(item_id: int, proposal: AgentProposal) -> None:
+def _proposal_signature(proposal: AgentProposal) -> tuple:
+    """Two proposals are "the same" for dedup purposes when every field a
+    reader would actually see is identical -- used to collapse near-
+    identical review-queue entries (see _group_review_items), never to
+    compare full AgentProposal objects (tool_calls/item_id legitimately
+    differ item to item even when the conclusion is the same)."""
+    return (
+        proposal.declined,
+        proposal.decline_reason,
+        proposal.proposed_canonical_ins,
+        proposal.proposed_classification,
+        proposal.confidence,
+        proposal.reasoning,
+    )
+
+
+def _render_agent_proposal(item_ids: list[int], proposal: AgentProposal) -> None:
+    """Renders ONE proposal shared by every item in `item_ids` (usually
+    one, but see _group_review_items -- several near-identical review-queue
+    items, e.g. two "MODIFIED CORNSTARCH" entries, share a single render
+    and a single Accept/Reject that applies to all of them at once).
+
+    The short reason is shown directly (decline_reason, or the proposed
+    identity line); the LONGER reasoning paragraph -- which restates the
+    same thing at more length -- and the evidence it is based on live
+    behind one "Why" expander instead of printing both unconditionally."""
     if proposal.declined:
         st.info(f"Assistant declined: {proposal.decline_reason}")
     else:
         code = f" (INS {proposal.proposed_canonical_ins})" if proposal.proposed_canonical_ins else ""
         st.markdown(f"**Assistant proposes:** {proposal.proposed_classification}{code} — confidence: {proposal.confidence}")
-    st.caption(proposal.reasoning)
-    if proposal.evidence:
-        with st.expander(f"Evidence ({len(proposal.evidence)})"):
-            for line in proposal.evidence:
-                st.markdown(f"- {line}")
+
+    evidence = [line for line in proposal.evidence if line and line.strip()]
+    if proposal.reasoning or evidence:
+        with st.expander("Why"):
+            if proposal.reasoning:
+                st.write(proposal.reasoning)
+            if evidence:
+                st.caption(f"Evidence ({len(evidence)})")
+                for line in evidence:
+                    st.markdown(f"- {line}")
+
     if proposal.tool_calls:
         with st.expander(f"Tool calls ({len(proposal.tool_calls)})"):
             for call in proposal.tool_calls:
                 st.caption(f"**{call.get('tool')}**({json.dumps(call.get('args', {}))}) → {call.get('result_summary')}")
 
+    key_id = item_ids[0]
     if not proposal.declined:
         col_accept, col_reject = st.columns(2)
         with col_accept:
-            if st.button("Accept", key=f"agent_accept_{item_id}", type="primary"):
-                _accept_agent_proposal(item_id, proposal)
+            if st.button("Accept", key=f"agent_accept_{key_id}", type="primary"):
+                for item_id in item_ids:
+                    _accept_agent_proposal(item_id, proposal)
                 st.rerun()
         with col_reject:
-            if st.button("Reject", key=f"agent_reject_{item_id}"):
-                _reject_agent_proposal(item_id)
+            if st.button("Reject", key=f"agent_reject_{key_id}"):
+                for item_id in item_ids:
+                    _reject_agent_proposal(item_id)
                 st.rerun()
-    elif st.button("Dismiss", key=f"agent_dismiss_{item_id}"):
-        _reject_agent_proposal(item_id)
+    elif st.button("Dismiss", key=f"agent_dismiss_{key_id}"):
+        for item_id in item_ids:
+            _reject_agent_proposal(item_id)
         st.rerun()
+
+
+def _group_review_items(items: list[dict], names: dict[int, str] | None) -> list[list[dict]]:
+    """Items with the SAME declared name that also got the SAME assistant
+    proposal (asked, not yet decided) are grouped -- MEASURED on a real
+    label: two "MODIFIED CORNSTARCH" entries produced near-identical
+    declines verbatim. Items not yet asked, or whose proposals diverge,
+    are never grouped: collapsing before proposals exist (or differ) would
+    hide a real distinction, not a duplicate."""
+    groups: list[list[dict]] = []
+    index_by_key: dict[tuple, int] = {}
+    for item in items:
+        item_id = item["item_id"]
+        display_name = item.get("additive_name") or (names or {}).get(item_id) or f"item {item_id}"
+        proposal = st.session_state.agent_proposals.get(item_id)
+        decision = st.session_state.agent_decisions.get(item_id)
+        key = (display_name, _proposal_signature(proposal)) if proposal is not None and decision is None else None
+        if key is not None and key in index_by_key:
+            groups[index_by_key[key]].append(item)
+            continue
+        if key is not None:
+            index_by_key[key] = len(groups)
+        groups.append([item])
+    return groups
+
+
+def _render_review_group(group: list[dict], names: dict[int, str] | None) -> None:
+    item_ids = [item["item_id"] for item in group]
+    primary = group[0]
+    primary_id = primary["item_id"]
+    display_name = primary.get("additive_name") or (names or {}).get(primary_id) or f"item {primary_id}"
+    candidates = [f.split(":", 1)[1].strip() for f in (primary.get("flags") or []) if f.startswith("candidate:")]
+
+    st.markdown(f"**{html.escape(display_name)}**", unsafe_allow_html=True)
+    if len(group) > 1:
+        st.caption(f"This name appears {len(group)} times on this label.")
+    if candidates:
+        st.caption("Possible matches: " + ", ".join(candidates))
+    else:
+        st.caption("No candidate match found -- needs manual identification.")
+
+    decision = st.session_state.agent_decisions.get(primary_id)
+    proposal = st.session_state.agent_proposals.get(primary_id)
+
+    if decision == "accepted":
+        st.success("Accepted -- the resolution and verdict were updated.")
+    elif decision == "rejected":
+        st.caption("Rejected -- left in the review queue.")
+        if st.button("Ask the assistant", key=f"agent_ask_{primary_id}"):
+            with st.spinner("Investigating…"):
+                for item_id in item_ids:
+                    _ask_agent_about_item(item_id)
+            st.rerun()
+    elif proposal is not None:
+        _render_agent_proposal(item_ids, proposal)
+    else:
+        if st.button("Ask the assistant", key=f"agent_ask_{primary_id}"):
+            with st.spinner("Investigating…"):
+                for item_id in item_ids:
+                    _ask_agent_about_item(item_id)
+            st.rerun()
+
+    st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
 
 
 def render_agent_review_queue(items: list[dict], names: dict[int, str] | None = None) -> None:
@@ -1186,7 +1284,8 @@ def render_agent_review_queue(items: list[dict], names: dict[int, str] | None = 
     unchanged, since those need a food-category confirmation, not an
     identity proposal. Same section title/note styling as the plain queue,
     with an "Ask the assistant" control (per item, and for the whole queue)
-    added below each entry."""
+    added below each entry. Items that turn out to share a name AND a
+    proposal render once, via _group_review_items."""
     if not items:
         return
     st.session_state.setdefault("agent_proposals", {})
@@ -1207,37 +1306,8 @@ def render_agent_review_queue(items: list[dict], names: dict[int, str] | None = 
                     _ask_agent_about_item(item["item_id"])
         st.rerun()
 
-    for item in items:
-        item_id = item["item_id"]
-        display_name = item.get("additive_name") or (names or {}).get(item_id) or f"item {item_id}"
-        candidates = [f.split(":", 1)[1].strip() for f in (item.get("flags") or []) if f.startswith("candidate:")]
-
-        st.markdown(f"**{html.escape(display_name)}**", unsafe_allow_html=True)
-        if candidates:
-            st.caption("Possible matches: " + ", ".join(candidates))
-        else:
-            st.caption("No candidate match found -- needs manual identification.")
-
-        decision = st.session_state.agent_decisions.get(item_id)
-        proposal = st.session_state.agent_proposals.get(item_id)
-
-        if decision == "accepted":
-            st.success("Accepted -- the resolution and verdict were updated.")
-        elif decision == "rejected":
-            st.caption("Rejected -- left in the review queue.")
-            if st.button("Ask the assistant", key=f"agent_ask_{item_id}"):
-                with st.spinner("Investigating…"):
-                    _ask_agent_about_item(item_id)
-                st.rerun()
-        elif proposal is not None:
-            _render_agent_proposal(item_id, proposal)
-        else:
-            if st.button("Ask the assistant", key=f"agent_ask_{item_id}"):
-                with st.spinner("Investigating…"):
-                    _ask_agent_about_item(item_id)
-                st.rerun()
-
-        st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
+    for group in _group_review_items(items, names):
+        _render_review_group(group, names)
 
 
 def render_results() -> None:
@@ -1327,7 +1397,7 @@ def render_results() -> None:
 
     components.render_verdict_section("Blocking", blocking_items, names, is_blocking=True)
     components.render_verdict_section("Category-dependent", conflict_items, names)
-    components.render_verdict_section("Permitted", permitted_items, names)
+    components.render_permitted_section("Permitted", permitted_items, names)
 
     components.render_substitutes(substitute_result.model_dump())
     components.render_horizon(horizon_result.model_dump())

@@ -267,6 +267,13 @@ def _parse_proposal(text: str | None, tool_calls_trace: list[dict]) -> dict:
         return _declined_dict("final answer was not a JSON object")
 
     evidence = raw.get("evidence")
+    # A list of blank/whitespace-only strings is truthy (`if not evidence`
+    # passes) but has nothing to show -- rendered as empty bullets in the
+    # UI. Filtered here, at parse time, not left for the renderer to
+    # paper over: an evidence list that is blank once stripped is exactly
+    # as invalid as one that was empty to begin with.
+    evidence = [str(e).strip() for e in evidence] if evidence else []
+    evidence = [e for e in evidence if e]
     if not evidence:
         return _declined_dict("proposal had no supporting evidence", reasoning=str(raw.get("reasoning") or ""))
     if not tool_calls_trace:
@@ -282,7 +289,7 @@ def _parse_proposal(text: str | None, tool_calls_trace: list[dict]) -> dict:
         "proposed_classification": classification if classification in _CLASSIFICATIONS else "unknown",
         "confidence": confidence if confidence in _CONFIDENCES else "low",
         "reasoning": str(raw.get("reasoning") or ""),
-        "evidence": [str(e) for e in evidence],
+        "evidence": evidence,
         "declined": declined,
         "decline_reason": str(raw["decline_reason"]) if declined and raw.get("decline_reason") else None,
     }

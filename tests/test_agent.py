@@ -181,6 +181,58 @@ def test_empty_evidence_proposal_is_rejected_and_marked_declined():
     assert proposal.decline_reason is not None and "evidence" in proposal.decline_reason.lower()
 
 
+def test_blank_evidence_strings_are_rejected_same_as_empty_list():
+    # MEASURED bug: a list of blank/whitespace-only strings is truthy (`if
+    # not evidence` passes), so it used to slip through as "valid" evidence
+    # and render as empty bullets in the UI. Must be treated the same as an
+    # empty list -- forced to declined.
+    tools = _mock_tools()
+    llm = MockLLM(
+        [
+            LLMTurn(tool_calls=[{"name": "lookup_codex", "args": {"term_or_code": "999"}}]),
+            LLMTurn(
+                text=_final_answer(
+                    declined=False,
+                    proposed_classification="additive",
+                    proposed_canonical_ins="999",
+                    confidence="high",
+                    evidence=["", "   "],
+                )
+            ),
+        ]
+    )
+    item = _item()
+
+    proposal = resolve_review_item(item, _FakeRefs(), llm, tools)
+
+    assert proposal.declined is True
+    assert proposal.evidence == []
+    assert proposal.decline_reason is not None and "evidence" in proposal.decline_reason.lower()
+
+
+def test_evidence_strings_are_stripped_of_surrounding_whitespace():
+    tools = _mock_tools()
+    llm = MockLLM(
+        [
+            LLMTurn(tool_calls=[{"name": "lookup_codex", "args": {"term_or_code": "999"}}]),
+            LLMTurn(
+                text=_final_answer(
+                    declined=False,
+                    proposed_classification="additive",
+                    proposed_canonical_ins="999",
+                    confidence="high",
+                    evidence=["  real evidence  ", ""],
+                )
+            ),
+        ]
+    )
+    item = _item()
+
+    proposal = resolve_review_item(item, _FakeRefs(), llm, tools)
+
+    assert proposal.evidence == ["real evidence"]
+
+
 def test_step_cap_halts_a_loop_that_keeps_calling_tools():
     tools = _mock_tools()
     # More turns than the step cap allows -- the graph must stop calling

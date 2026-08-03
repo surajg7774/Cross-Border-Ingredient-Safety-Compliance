@@ -335,6 +335,35 @@ def test_e330_real_shape_14_1_4_group_i_two_clauses_both_shown():
     assert "multiple_provisions_apply: 2" in item.flags
 
 
+def test_nbsp_only_condition_is_dropped_not_numbered_as_an_empty_clause():
+    # MEASURED bug (data/reference/eu_fip.json): some rows carry a literal
+    # "&nbsp;" as a scraped placeholder for an empty conditions cell --
+    # truthy in Python, but renders as an empty numbered list item ("2)"
+    # with nothing after it) once merged alongside a real clause. The blank
+    # row must be dropped, not numbered.
+    eu_fip = [
+        _row("150c", "14.2.1", conditions="&nbsp;"),
+        _row("150c", "14.2.1", conditions='only "Table beer"'),
+    ]
+    resolved = [_resolved(0, "additive", eu_canonical_id="150c")]
+    category_results = {0: _category_result("product", None, ["14.2.1"], additive_ids=["150c"])}
+    verdict = evaluate(resolved, category_results, eu_fip)
+    item = verdict.items[0]
+    assert item.by_category[0].conditions == 'only "Table beer"'
+    assert "1)" not in item.by_category[0].conditions
+    assert "2)" not in item.by_category[0].conditions
+
+
+def test_nbsp_only_condition_on_a_single_row_normalizes_to_no_conditions():
+    eu_fip = [_row("300", "6.2.1", conditions="&nbsp;")]
+    resolved = [_resolved(0, "additive", eu_canonical_id="300")]
+    category_results = {0: _category_result("product", None, ["6.2.1"], additive_ids=["300"])}
+    verdict = evaluate(resolved, category_results, eu_fip)
+    item = verdict.items[0]
+    assert item.by_category[0].conditions is None
+    assert item.headline == "permitted_qs"
+
+
 def test_status_disagreement_keeps_old_conflicting_rows_behaviour_not_merged():
     # A genuine contradiction (one row permits, another prohibits) is not
     # two co-applicable provisions -- there is no sensible "merge" of a

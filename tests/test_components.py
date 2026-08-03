@@ -9,8 +9,11 @@ from src.ui.components import (
     _is_ancestor_code,
     _out_of_scope_reason,
     _period_of_application_note,
+    _permitted_group_key,
     _primary_candidate,
+    _short_category_name,
     _substitute_flag_label,
+    _verdict_label,
     count_buckets,
     verdict_strip_html,
 )
@@ -329,3 +332,71 @@ def test_count_buckets_are_mutually_exclusive_and_sum_to_item_total():
 
 def test_count_buckets_empty_list_sums_to_zero():
     assert sum(count_buckets([]).values()) == 0
+
+
+def test_short_category_name_strips_trailing_legal_citation():
+    assert (
+        _short_category_name("Cocoa and chocolate products as covered by Directive 2000/36/EC")
+        == "Cocoa and chocolate products"
+    )
+
+
+def test_short_category_name_strips_citation_in_the_middle_keeps_the_rest():
+    assert (
+        _short_category_name("Fruit juices as defined by Directive 2001/112/EC and vegetable juices")
+        == "Fruit juices and vegetable juices"
+    )
+
+
+def test_short_category_name_unchanged_when_no_citation():
+    assert _short_category_name("Seasonings and condiments") == "Seasonings and condiments"
+
+
+def test_short_category_name_none_passthrough():
+    assert _short_category_name(None) is None
+
+
+def test_verdict_label_plain_english_wording():
+    assert _verdict_label("permitted_with_conditions") == ("Allowed — conditions to check", "permitted")
+    assert _verdict_label("not_permitted_in_category") == ("Not allowed in this kind of food", "blocked")
+    assert _verdict_label("not_authorised_eu") == ("Not allowed in the EU", "blocked")
+    assert _verdict_label("permitted_qs") == ("Allowed — no fixed limit", "permitted")
+
+
+def test_verdict_label_with_limit_includes_the_actual_level():
+    label, bucket = _verdict_label("permitted_with_limit", 5000.0)
+    assert label == "Allowed — up to 5000 mg/kg"
+    assert bucket == "permitted"
+
+
+def test_verdict_label_with_limit_missing_level_falls_back():
+    label, _bucket = _verdict_label("permitted_with_limit", None)
+    assert label == "Allowed — no fixed limit"
+
+
+def test_permitted_group_key_same_for_items_sharing_the_whole_block():
+    item_a = {
+        "component_label": "SEASONING",
+        "by_category": [_candidate("5.1", "permitted_with_conditions", conditions="Group I text", category_name="Cocoa")],
+        "confirmed_fcs_code": "5.1",
+    }
+    item_b = {
+        "component_label": "SEASONING",
+        "by_category": [_candidate("5.1", "permitted_with_conditions", conditions="Group I text", category_name="Cocoa")],
+        "confirmed_fcs_code": "5.1",
+    }
+    assert _permitted_group_key(item_a) == _permitted_group_key(item_b)
+
+
+def test_permitted_group_key_differs_when_conditions_differ():
+    item_a = {
+        "component_label": "SEASONING",
+        "by_category": [_candidate("5.1", "permitted_with_limit", conditions=None, max_level_mg_kg=5000.0, category_name="Cocoa")],
+        "confirmed_fcs_code": "5.1",
+    }
+    item_b = {
+        "component_label": "SEASONING",
+        "by_category": [_candidate("5.1", "permitted_with_conditions", conditions="Group I text", category_name="Cocoa")],
+        "confirmed_fcs_code": "5.1",
+    }
+    assert _permitted_group_key(item_a) != _permitted_group_key(item_b)

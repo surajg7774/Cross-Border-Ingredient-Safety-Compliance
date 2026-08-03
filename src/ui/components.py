@@ -20,19 +20,38 @@ import re
 
 import streamlit as st
 
-# verdict string -> (human-readable label, colour bucket). Never "banned" --
-# the EU verdict is "not authorised as a food additive in the EU".
-_VERDICT_LABELS: dict[str, tuple[str, str]] = {
-    "permitted_qs": ("permitted", "permitted"),
-    "permitted_with_limit": ("permitted, max level applies", "permitted"),
-    "permitted_with_conditions": ("permitted, conditions apply", "permitted"),
-    "not_permitted_in_category": ("not permitted in this category", "blocked"),
-    "not_authorised_eu": ("not authorised as a food additive in the EU", "blocked"),
+# verdict string -> (plain-English label, colour bucket). The internal
+# verdict strings themselves are UNCHANGED -- they are what the JSON export
+# writes (verdict.model_dump()) and what every other module compares
+# against; only this display mapping changed. Never "banned" -- the EU
+# verdict is "not authorised as a food additive in the EU".
+_VERDICT_BUCKETS: dict[str, str] = {
+    "permitted_qs": "permitted",
+    "permitted_with_limit": "permitted",
+    "permitted_with_conditions": "permitted",
+    "not_permitted_in_category": "blocked",
+    "not_authorised_eu": "blocked",
+}
+_VERDICT_LABELS: dict[str, str] = {
+    "permitted_qs": "Allowed — no fixed limit",
+    "permitted_with_conditions": "Allowed — conditions to check",
+    "not_permitted_in_category": "Not allowed in this kind of food",
+    "not_authorised_eu": "Not allowed in the EU",
 }
 
 
-def _verdict_label(verdict: str) -> tuple[str, str]:
-    return _VERDICT_LABELS.get(verdict, (verdict.replace("_", " "), "neutral"))
+def _level_phrase(max_level_mg_kg: float | None) -> str:
+    if max_level_mg_kg is None:
+        return "no fixed limit"
+    level = int(max_level_mg_kg) if max_level_mg_kg == int(max_level_mg_kg) else max_level_mg_kg
+    return f"up to {level} mg/kg"
+
+
+def _verdict_label(verdict: str, max_level_mg_kg: float | None = None) -> tuple[str, str]:
+    bucket = _VERDICT_BUCKETS.get(verdict, "neutral")
+    if verdict == "permitted_with_limit":
+        return f"Allowed — {_level_phrase(max_level_mg_kg)}", bucket
+    return _VERDICT_LABELS.get(verdict, verdict.replace("_", " ")), bucket
 
 
 # WHY a blocking verdict blocks -- a bare name with no reason forces a
@@ -71,6 +90,36 @@ _SUBSTITUTE_FLAG_LABELS: dict[str, str] = {
 # flat "N.N.N..." strings.
 _GROUP_CONDITIONS_RE = re.compile(r"^(?:\d+\)\s*)?Permitted via (Group [IVX]+(?:,\s*[A-Za-z]+)?)")
 _PERIOD_OF_APPLICATION_RE = re.compile(r"period of application", re.IGNORECASE)
+
+# food_categories.json's refDataFoodCategoryEN names carry the legal
+# citation inline ("Cocoa and chocolate products as covered by Directive
+# 2000/36/EC"), not as a separate field -- 25 of 154 categories MEASURED to
+# have one. Inline, seven repeats of the full sentence is unreadable; the
+# citation is dropped for body text and the caller shows the untouched
+# category_name once, in the header, instead. Non-greedy up to the next
+# " and " (not just end-of-string) because a few names put real category
+# content AFTER the citation ("Fruit juices as defined by Directive
+# 2001/112/EC and vegetable juices").
+_CATEGORY_CITATION_RE = re.compile(
+    r"\s+as (?:defined|covered|referred to)\s+(?:by|in)\s+(?:Directive|Regulation)\b[^,]*?(?=\s+and\b|$)",
+    re.IGNORECASE,
+)
+
+
+def _short_category_name(name: str | None) -> str | None:
+    if not name:
+        return None
+    return _CATEGORY_CITATION_RE.sub("", name).strip()
+
+
+def _category_display(fcs_code: str | None, category_name: str | None) -> str:
+    """"Cocoa and chocolate products (5.1)" -- body text. The full legal
+    title (category_name, untouched) is shown once, in the identity
+    header, by app.py's _category_summary -- never re-derived here."""
+    short = _short_category_name(category_name)
+    if not short:
+        return fcs_code or ""
+    return f"{short} ({fcs_code})" if fcs_code else short
 
 
 def _is_ancestor_code(candidate_code: str, of_code: str) -> bool:
@@ -231,7 +280,7 @@ def verdict_strip_html(item: dict, display_name: str) -> str:
 
     blocks = []
     for cv in shown:
-        label, bucket = _verdict_label(cv["verdict"])
+        label, bucket = _verdict_label(cv["verdict"], cv.get("max_level_mg_kg"))
         is_confirmed = confirmed_code is not None and cv["fcs_code"] == confirmed_code
         # Only dim when there IS a confirmed candidate to contrast against
         # -- an unconfirmed multi-candidate strip shows every block at full
@@ -239,7 +288,7 @@ def verdict_strip_html(item: dict, display_name: str) -> str:
         dimmed = len(shown) > 1 and confirmed_code is not None and not is_confirmed
         code_part = f"<span class='eu-code'>{_esc(cv['fcs_code'])}</span>"
         if cv.get("category_name"):
-            code_part += f" <span class='eu-block-category'>{_esc(cv['category_name'])}</span>"
+            code_part += f" <span class='eu-block-category'>{_esc(_short_category_name(cv['category_name']))}</span>"
         tag = "<span class='eu-block-confirmed-tag'>confirmed</span>" if is_confirmed else ""
         attrs = f"data-bucket='{bucket}' data-confirmed='{str(is_confirmed).lower()}'"
         if dimmed:
@@ -313,20 +362,13 @@ def render_count_strip(counts: dict[str, int]) -> None:
     st.markdown(f"<div class='eu-count-strip'>{cells}</div>", unsafe_allow_html=True)
 
 
-def render_verdict_row(item: dict, names: dict[int, str] | None = None, *, is_blocking: bool = False) -> None:
-    """One additive's full row: the verdict strip, WHY it blocks (blocking
-    section only), its citation (a real link, or an explicit "no source
-    URL" note -- never silence), the in-force date, and its conditions --
-    first line inline, the rest behind an expander labelled what it is."""
-    display_name = _display_name(item, names)
-    st.markdown(verdict_strip_html(item, display_name), unsafe_allow_html=True)
-
-    if is_blocking:
-        st.markdown(f"<p class='eu-caption'>{_esc(_blocking_reason(item))}</p>", unsafe_allow_html=True)
-
-    top = _primary_candidate(item)
-    flags = item.get("flags") or []
-
+def _render_citation_and_conditions(top: dict | None, flags: list[str]) -> None:
+    """The citation (a real link, or an explicit "no source URL" note --
+    never silence), the in-force date, and the conditions -- first line
+    inline, the rest behind an expander labelled what it is. Shared by
+    render_verdict_row (one additive) and _render_permitted_group (several
+    additives that share this exact block) -- so a citation or a numbered-
+    conditions fix only has to happen once."""
     if top is not None:
         # Every source_url becomes a real link; a null one says so
         # explicitly instead of silently rendering nothing -- this is the
@@ -378,20 +420,111 @@ def render_verdict_row(item: dict, names: dict[int, str] | None = None, *, is_bl
                 if top.get("note_codes"):
                     st.caption("Note codes: " + ", ".join(top["note_codes"]))
 
+
+def render_verdict_row(item: dict, names: dict[int, str] | None = None, *, is_blocking: bool = False) -> None:
+    """One additive's full row: the verdict strip, WHY it blocks (blocking
+    section only), its citation, in-force date, and conditions."""
+    display_name = _display_name(item, names)
+    st.markdown(verdict_strip_html(item, display_name), unsafe_allow_html=True)
+
+    if is_blocking:
+        st.markdown(f"<p class='eu-caption'>{_esc(_blocking_reason(item))}</p>", unsafe_allow_html=True)
+
+    _render_citation_and_conditions(_primary_candidate(item), item.get("flags") or [])
     st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
 
 
 def render_verdict_section(
     title: str, items: list[dict], names: dict[int, str] | None = None, *, is_blocking: bool = False
 ) -> None:
-    """A titled group of verdict rows -- BLOCKING, CATEGORY-DEPENDENT, or
-    PERMITTED. Renders nothing when `items` is empty, so callers can invoke
-    every section unconditionally."""
+    """A titled group of verdict rows -- BLOCKING or CATEGORY-DEPENDENT.
+    Renders nothing when `items` is empty, so callers can invoke every
+    section unconditionally. PERMITTED items go through
+    render_permitted_section instead (see its docstring for why)."""
     if not items:
         return
     st.markdown(f"<div class='eu-section-title'>{_esc(title)} ({len(items)})</div>", unsafe_allow_html=True)
     for item in items:
         render_verdict_row(item, names, is_blocking=is_blocking)
+
+
+def _permitted_group_key(item: dict) -> tuple:
+    """Items in the Permitted section never diverge by candidate category
+    (a divergent item is routed to Category-dependent instead), so the
+    primary candidate's own content -- category, verdict, level, source,
+    conditions -- fully determines what renders. Two items with an
+    identical key render the SAME block, so they are grouped instead of
+    repeating it verbatim once per additive (MEASURED: EU_productmain's
+    Group I explanation + conditions repeated 4x, word for word)."""
+    top = _primary_candidate(item)
+    if top is None:
+        return ("item", item.get("item_id"))
+    return (
+        item.get("component_label"),
+        top.get("fcs_code"),
+        top.get("category_name"),
+        top.get("verdict"),
+        top.get("max_level_mg_kg"),
+        top.get("max_level_basis"),
+        top.get("conditions"),
+        top.get("source_url"),
+        top.get("retrieved_date"),
+        tuple(top.get("note_codes") or []),
+    )
+
+
+def _render_permitted_group(group: list[dict], names: dict[int, str] | None) -> None:
+    top = _primary_candidate(group[0])
+    label, bucket = (_verdict_label(top["verdict"], top.get("max_level_mg_kg")) if top else ("Allowed", "permitted"))
+    group_note_match = _GROUP_CONDITIONS_RE.match((top or {}).get("conditions") or "")
+    if group_note_match:
+        level_phrase = _level_phrase((top or {}).get("max_level_mg_kg"))
+        label = f"Allowed as part of {group_note_match.group(1)} — {level_phrase}"
+
+    names_html = " · ".join(
+        (f"<span class='eu-code'>E{_esc(item['eu_canonical_id'])}</span> " if item.get("eu_canonical_id") else "")
+        + _esc(_display_name(item, names))
+        for item in group
+    )
+    where = _category_display(top.get("fcs_code"), top.get("category_name")) if top else ""
+    component = group[0].get("component_label")
+    where_html = f" in {_esc(component)} ({_esc(where)})" if component and where else (f" in {_esc(where)}" if where else "")
+
+    st.markdown(
+        f"<div class='eu-strip-head'><span class='eu-strip-name'>{names_html}</span></div>"
+        f"<div class='eu-strip-blocks'><div class='eu-block' data-bucket='{bucket}'>"
+        f"<span class='eu-block-verdict'>{_esc(label)}</span></div></div>"
+        + (f"<p class='eu-caption'>Applies{where_html}</p>" if where_html else ""),
+        unsafe_allow_html=True,
+    )
+    _render_citation_and_conditions(top, [])
+    st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
+
+
+def render_permitted_section(title: str, items: list[dict], names: dict[int, str] | None = None) -> None:
+    """Like render_verdict_section, but items sharing the exact same block
+    (see _permitted_group_key) render ONCE, with every additive that
+    shares it listed together, instead of repeating the same explanation
+    and conditions text once per additive."""
+    if not items:
+        return
+    st.markdown(f"<div class='eu-section-title'>{_esc(title)} ({len(items)})</div>", unsafe_allow_html=True)
+
+    groups: dict[tuple, list[dict]] = {}
+    order: list[tuple] = []
+    for item in items:
+        key = _permitted_group_key(item)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(item)
+
+    for key in order:
+        group = groups[key]
+        if len(group) == 1:
+            render_verdict_row(group[0], names)
+        else:
+            _render_permitted_group(group, names)
 
 
 def render_out_of_scope(items: list[dict], names: dict[int, str] | None = None) -> None:
@@ -469,7 +602,7 @@ def render_substitutes(result: dict) -> None:
                 f"<td class='eu-code'>E{_esc(c['eu_canonical_id'])}</td>"
                 f"<td>{_esc(c.get('additive_name'))}</td>"
                 f"<td>{_esc(', '.join(c.get('shared_functional_classes') or []))}</td>"
-                f"<td>{_esc(_verdict_label(c['verdict'])[0])}</td>"
+                f"<td>{_esc(_verdict_label(c['verdict'], c.get('max_level_mg_kg'))[0])}</td>"
                 f"<td class='eu-code'>{_esc(level)}</td>"
                 f"<td>{_esc(flags_display)}</td>"
                 "</tr>"
@@ -519,26 +652,30 @@ def render_substitutes(result: dict) -> None:
 
 
 def render_horizon(result: dict) -> None:
-    """Regulatory-horizon signals. Always renders the coverage caveat,
-    verbatim, even when there are no signals -- dropping it here would
-    silently make a partial dataset read as comprehensive (see
-    docs/findings.md F-12). The coverage caveat is rendered BEFORE the "no
-    recent activity" reassurance, not after: reading the reassurance first
-    and the caveat second undersells the caveat."""
+    """Regulatory-horizon signals. The coverage caveat (see docs/findings.md
+    F-12) is never DROPPED -- silently making a partial dataset read as
+    comprehensive is exactly the bug F-12 covers -- but it no longer prints
+    unconditionally: three paragraphs explaining the limits of an empty
+    result is worse than the empty result. Both caveats live in "About
+    these signals", one line short of always-visible; the empty-signals
+    case gets a single line that points there."""
     st.markdown("<div class='eu-section-title'>Regulatory horizon</div>", unsafe_allow_html=True)
-    st.markdown(
-        "<p class='eu-section-note'>Advisory only. These signals never change the compliance "
-        "verdict above -- an EFSA opinion is not law. Additives can be re-assessed by EFSA years "
-        "before the law changes; these are early signals, not current requirements.</p>",
-        unsafe_allow_html=True,
-    )
-
-    for warning in result.get("warnings") or []:
-        st.markdown(f"<p class='eu-caption'>{_esc(warning)}</p>", unsafe_allow_html=True)
 
     signals = result.get("signals") or []
+    warnings = result.get("warnings") or []
+
+    with st.expander("About these signals"):
+        st.markdown(
+            "<p class='eu-section-note'>Advisory only. These signals never change the compliance "
+            "verdict above -- an EFSA opinion is not law. Additives can be re-assessed by EFSA years "
+            "before the law changes; these are early signals, not current requirements.</p>",
+            unsafe_allow_html=True,
+        )
+        for warning in warnings:
+            st.markdown(f"<p class='eu-caption'>{_esc(warning)}</p>", unsafe_allow_html=True)
+
     if not signals:
-        st.caption("No recent EFSA activity found for the additives checked.")
+        st.caption("No EFSA review signals for these additives. Coverage is partial — see the report notes.")
     else:
         rows = []
         for signal in signals:
