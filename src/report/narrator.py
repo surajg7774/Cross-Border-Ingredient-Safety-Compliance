@@ -26,6 +26,7 @@ a report must always be producible without the model.
 """
 
 import json
+import logging
 import re
 
 from pydantic import BaseModel
@@ -35,6 +36,8 @@ from src.model_call import strip_markdown_fences
 from src.rules.schemas import ProductVerdict
 from src.substitutes.schemas import SubstituteResult
 from src.text_generation import get_text_generator
+
+log = logging.getLogger("report.narrator")
 
 # Matches "E551", "E 551", "E160a", "E1105(i)" -- group(1) is the bare code
 # with the "E" prefix stripped, for comparison against eu_canonical_id
@@ -231,9 +234,12 @@ def narrate(
         data = json.loads(strip_markdown_fences(raw))
         summary = str(data["summary"])
         detail = _coerce_detail(data["detail"])
-    except Exception:  # noqa: BLE001 -- ANY failure (network, rate limit, bad JSON, missing key, wrong
-        # "detail" shape) must fall back to the deterministic summary, never crash report generation --
-        # see the module docstring.
+    except Exception as exc:  # noqa: BLE001 -- ANY failure (network, rate limit, bad JSON, missing key,
+        # wrong "detail" shape) must fall back to the deterministic summary, never crash report
+        # generation -- see the module docstring. Logged, not silent: model_id="unavailable" on its own
+        # tells a reader THAT it fell back, never WHY -- a run whose narration.summary happens to match
+        # verdict.summary verbatim is otherwise undiagnosable (nothing else records the failure).
+        log.warning("narrate() falling back to the deterministic summary: %s: %s", type(exc).__name__, exc)
         return Narration(
             summary=verdict.summary,
             detail={"Note": ["Narration was unavailable -- showing the deterministic summary only."]},

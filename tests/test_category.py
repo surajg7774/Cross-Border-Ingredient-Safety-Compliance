@@ -911,3 +911,33 @@ def test_legacy_cache_key_omits_task_type_and_matches_pre_fix_format():
     assert _legacy_cache_key("some category text", "gemini-embedding-001", 768) != _cache_key(
         "some category text", "gemini-embedding-001", 768, "RETRIEVAL_DOCUMENT"
     )
+
+
+def test_legacy_cache_hits_are_aggregated_into_one_warning(monkeypatch, tmp_path, caplog):
+    # MEASURED: a full corpus embed can hit the legacy key on nearly every
+    # document (~155), which used to mean one WARNING line per hit. Must be
+    # exactly one aggregated line per _embed_many call, with the count --
+    # never re-embeds (no API call: every text is pre-seeded as a hit,
+    # either current-key or legacy-key, so `to_fetch` is always empty).
+    import json
+    import logging
+
+    from src.category.embedder import DIMENSIONALITY, GeminiEmbedder, _legacy_cache_key
+
+    cache_path = tmp_path / "category_embeddings.json"
+    texts = {"5.1": "cocoa text", "7.2": "bakery text", "9.1": "fish text"}
+    seeded_cache = {
+        _legacy_cache_key(text, "gemini-embedding-001", DIMENSIONALITY): [0.1, 0.2]
+        for text in texts.values()
+    }
+    cache_path.write_text(json.dumps(seeded_cache), encoding="utf-8")
+    monkeypatch.setattr("src.category.embedder._CACHE_PATH", cache_path)
+
+    embedder = GeminiEmbedder(model_id="gemini-embedding-001")
+    with caplog.at_level(logging.WARNING, logger="category.embedder"):
+        result = embedder.embed_documents(texts)
+
+    assert len(result) == 3
+    warnings = [r for r in caplog.records if r.name == "category.embedder"]
+    assert len(warnings) == 1
+    assert "3 of 3" in warnings[0].getMessage()

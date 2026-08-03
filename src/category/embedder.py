@@ -103,6 +103,11 @@ class GeminiEmbedder:
         cache = _load_cache()
         results: dict[str, list[float]] = {}
         to_fetch: dict[str, str] = {}
+        # Counted, not logged per-hit: a full corpus embed (~155 documents)
+        # can hit the legacy key on nearly every one of them, which used to
+        # mean ~155 near-identical WARNING lines per run -- one aggregated
+        # line at the end says the same thing without flooding the log.
+        legacy_hits = 0
         for key, text in texts.items():
             cache_key = _cache_key(text, self.model_id, DIMENSIONALITY, task_type)
             if cache_key in cache:
@@ -110,16 +115,20 @@ class GeminiEmbedder:
                 continue
             legacy_key = _legacy_cache_key(text, self.model_id, DIMENSIONALITY)
             if legacy_key in cache:
-                log.warning(
-                    "embedding cache hit on the legacy (task_type-less) key for %r "
-                    "(task_type=%s) -- re-embed under the current key to pick up a "
-                    "task-type-specific vector once quota allows",
-                    text[:80],
-                    task_type,
-                )
+                legacy_hits += 1
                 results[key] = cache[legacy_key]
                 continue
             to_fetch[key] = text
+
+        if legacy_hits:
+            log.warning(
+                "embedding cache: %d of %d lookup(s) hit the legacy (task_type-less) key "
+                "(task_type=%s) -- re-embed under the current key to pick up task-type-specific "
+                "vectors once quota allows",
+                legacy_hits,
+                len(texts),
+                task_type,
+            )
 
         if to_fetch:
             keys = list(to_fetch.keys())

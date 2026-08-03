@@ -21,6 +21,7 @@ from src.text_generation import (
     EmptyResponseError,
     GeminiTextGenerator,
     LangChainTextGenerator,
+    _extract_message_text,
     get_text_generator,
 )
 
@@ -36,6 +37,23 @@ def _llm_result(text: str, finish_reason: str | None = "STOP", llm_output: dict 
     metadata = {"finish_reason": finish_reason} if finish_reason else {}
     message = AIMessage(content=text, response_metadata=metadata)
     return LLMResult(generations=[[ChatGeneration(message=message)]], llm_output=llm_output or {})
+
+
+def _llm_result_with_content(content: object, finish_reason: str | None = "STOP") -> LLMResult:
+    metadata = {"finish_reason": finish_reason} if finish_reason else {}
+    message = AIMessage(content=content, response_metadata=metadata)
+    return LLMResult(generations=[[ChatGeneration(message=message)]], llm_output={})
+
+
+def _text_block(text: str) -> dict:
+    # The EXACT shape observed live against PRIMARY_MODEL=gemini-3.5-flash:
+    # a successful, non-empty reply's AIMessage.content is a list of these,
+    # not a plain string.
+    return {
+        "type": "text",
+        "text": text,
+        "extras": {"signature": "ErcECrQEARFNMg+lREWxhVhXaiVsGko2jZkjEFod/xaxMKtkGKkfjQe"},
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -96,6 +114,87 @@ def test_langchain_generator_returns_text(monkeypatch):
 
     generator = LangChainTextGenerator()
     assert generator.complete("prompt", "fake-model") == "hello"
+
+
+# --------------------------------------------------------------------------- #
+# MEASURED bug: PRIMARY_MODEL=gemini-3.5-flash returns AIMessage.content as a
+# LIST of content blocks on a successful reply, not a plain string -- every
+# test above uses string content, which is why none of them caught this.
+# --------------------------------------------------------------------------- #
+def test_langchain_generator_extracts_text_from_content_block_list(monkeypatch):
+    result = _llm_result_with_content([_text_block("hello")])
+    monkeypatch.setattr(ChatGoogleGenerativeAI, "generate", lambda self, messages: result)
+
+    generator = LangChainTextGenerator()
+    assert generator.complete("prompt", "gemini-3.5-flash") == "hello"
+
+
+def test_langchain_generator_concatenates_multiple_text_blocks_in_order(monkeypatch):
+    result = _llm_result_with_content([_text_block("hello "), _text_block("world")])
+    monkeypatch.setattr(ChatGoogleGenerativeAI, "generate", lambda self, messages: result)
+
+    generator = LangChainTextGenerator()
+    assert generator.complete("prompt", "gemini-3.5-flash") == "hello world"
+
+
+def test_langchain_generator_ignores_non_text_blocks(monkeypatch):
+    thinking_block = {"type": "thinking", "thinking": "reasoning about the answer..."}
+    result = _llm_result_with_content([thinking_block, _text_block("hello")])
+    monkeypatch.setattr(ChatGoogleGenerativeAI, "generate", lambda self, messages: result)
+
+    generator = LangChainTextGenerator()
+    assert generator.complete("prompt", "gemini-3.5-flash") == "hello"
+
+
+def test_langchain_generator_raises_on_empty_string_content(monkeypatch):
+    result = _llm_result_with_content("")
+    monkeypatch.setattr(ChatGoogleGenerativeAI, "generate", lambda self, messages: result)
+
+    generator = LangChainTextGenerator()
+    with pytest.raises(EmptyResponseError):
+        generator.complete("prompt", "fake-model")
+
+
+def test_langchain_generator_raises_on_empty_block_list_content(monkeypatch):
+    result = _llm_result_with_content([])
+    monkeypatch.setattr(ChatGoogleGenerativeAI, "generate", lambda self, messages: result)
+
+    generator = LangChainTextGenerator()
+    with pytest.raises(EmptyResponseError):
+        generator.complete("prompt", "gemini-3.5-flash")
+
+
+def test_langchain_generator_raises_on_block_list_with_only_non_text_blocks(monkeypatch):
+    # All thinking, no text -- must still be treated as empty, not silently
+    # return the thinking content.
+    result = _llm_result_with_content([{"type": "thinking", "thinking": "..."}])
+    monkeypatch.setattr(ChatGoogleGenerativeAI, "generate", lambda self, messages: result)
+
+    generator = LangChainTextGenerator()
+    with pytest.raises(EmptyResponseError):
+        generator.complete("prompt", "gemini-3.5-flash")
+
+
+def test_extract_message_text_raises_type_error_naming_the_shape_on_unrecognised_content():
+    # Neither a string nor a list -- must fail LOUDLY, not degrade to "".
+    # This is the whole point of the fix: an unrecognised shape must never
+    # look like an empty response again. Tested directly against
+    # _extract_message_text, not through a real AIMessage: AIMessage.content
+    # is itself pydantic-typed as `str | list[str | dict]`, so a bare dict
+    # can never actually reach this function via a real LangChain response
+    # -- but the function must still refuse to silently accept one.
+    with pytest.raises(TypeError, match="dict"):
+        _extract_message_text({"unexpected": "dict shape"})
+
+
+def test_langchain_generator_raises_type_error_naming_an_unrecognised_block_shape(monkeypatch):
+    # A list, but containing something that isn't a block dict at all.
+    result = _llm_result_with_content(["just a bare string, not a block"])
+    monkeypatch.setattr(ChatGoogleGenerativeAI, "generate", lambda self, messages: result)
+
+    generator = LangChainTextGenerator()
+    with pytest.raises(TypeError, match="str"):
+        generator.complete("prompt", "gemini-3.5-flash")
 
 
 def test_langchain_generator_constructs_with_max_retries_one(monkeypatch):

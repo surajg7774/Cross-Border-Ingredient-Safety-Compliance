@@ -100,6 +100,40 @@ class EmptyResponseError(RuntimeError):
     of the same name."""
 
 
+def _extract_message_text(content: object) -> str:
+    """AIMessage.content is a plain string for most models -- but MEASURED,
+    with PRIMARY_MODEL=gemini-3.5-flash, a successful ("finish_reason=STOP")
+    reply comes back as a LIST of content blocks instead:
+    [{"type": "text", "text": "...", "extras": {"signature": "..."}}],
+    sometimes interleaved with non-text blocks (e.g. "thinking"). The
+    previous `... if isinstance(content, str) else ""` treated that whole
+    shape as empty and raised EmptyResponseError on a perfectly good
+    response -- this is the fix.
+
+    Never degrades an unrecognised shape to "" -- that silent degradation
+    is exactly how the bug above survived. A shape this function doesn't
+    understand raises TypeError naming the actual type and repr, so a
+    future format change fails loudly instead of looking like an empty
+    response again.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text") or "")
+            elif isinstance(block, dict):
+                continue  # a non-text block (e.g. "thinking") -- ignored, not an error
+            else:
+                raise TypeError(
+                    "unrecognised content block in AIMessage.content list: "
+                    f"{type(block).__name__}: {block!r}"
+                )
+        return "".join(parts)
+    raise TypeError(f"unrecognised AIMessage.content shape: {type(content).__name__}: {content!r}")
+
+
 class TextGenerator(Protocol):
     def complete(self, prompt: str, model_id: str) -> str:
         """Send `prompt` to `model_id`, return the raw text response
@@ -172,7 +206,7 @@ class LangChainTextGenerator:
                 raise
 
             message = result.generations[0][0].message
-            text = message.content if isinstance(message.content, str) else ""
+            text = _extract_message_text(message.content)
             if not text:
                 finish_reason = message.response_metadata.get("finish_reason")
                 prompt_feedback = (result.llm_output or {}).get("prompt_feedback")
