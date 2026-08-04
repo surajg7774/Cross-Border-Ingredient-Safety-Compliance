@@ -43,6 +43,7 @@ from src.report.narrator import narrate
 from src.resolve.resolver import References, resolve_items
 from src.resolve.schemas import ResolvedItem
 from src.rules.engine import evaluate
+from src.rules.naming import enrich_additive_names, extraction_names
 from src.rules.schemas import ProductVerdict
 from src.schemas import GateResult
 from src.substitutes.advisor import find_substitutes
@@ -277,7 +278,9 @@ def _join_category_results(
     return mapping, frozenset(confirmed_item_ids)
 
 
-def make_verdict_node(eu_fip: list[dict], category_names: dict[str, str]) -> Callable[[dict], dict]:
+def make_verdict_node(
+    eu_fip: list[dict], category_names: dict[str, str], codex_ins: list[dict]
+) -> Callable[[dict], dict]:
     def verdict_node(state: dict) -> dict:
         try:
             resolved_items = _resolved_items_from_state(state)
@@ -302,6 +305,18 @@ def make_verdict_node(eu_fip: list[dict], category_names: dict[str, str]) -> Cal
                 category_results, choices, resolved_items, item_labels
             )
             verdict = evaluate(resolved_items, item_category_map, eu_fip, confirmed_item_ids)
+            # additive_name is null out of evaluate() for anything absent
+            # from eu_fip -- which is EVERY not_authorised_eu item, by
+            # construction. Backfilled here, inside the node, so that
+            # state["verdict"] is enriched before substitutes_node and
+            # narrate_node read it. Doing this in app.py after
+            # graph.invoke() returns is too late: both have already run.
+            verdict = enrich_additive_names(
+                verdict,
+                extraction_names(state["extraction"]),
+                {r.item_id: r.canonical_ins for r in resolved_items if r.canonical_ins},
+                {row["ins"]: row["name"] for row in codex_ins},
+            )
             return {"verdict": verdict.model_dump(mode="json")}
         except Exception as exc:  # noqa: BLE001
             return {"errors": [f"verdict_node: {exc}"]}

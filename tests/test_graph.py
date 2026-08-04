@@ -8,6 +8,11 @@ own imported names -- no API calls anywhere in this file.
 build_queries itself is NOT mocked: it is pure, already thoroughly tested
 in tests/test_category.py, and it is what actually produces the fan-out --
 mocking it would mean never really testing the Send dispatch at all.
+enrich_additive_names/extraction_names (src/rules/naming.py) are ALSO left
+real, for the same reason -- they need no API key, no network, no
+reference data beyond what a test already builds by hand, and
+test_verdict_node_enriches_unnamed_item_via_codex_ins below exists
+specifically to exercise the real thing.
 """
 
 from pathlib import Path
@@ -205,6 +210,43 @@ def _fake_verdict() -> ProductVerdict:
     )
 
 
+def _fake_verdict_with_unnamed_blocked_item() -> ProductVerdict:
+    """The real-world bug this whole change exists to fix: an item blocked
+    as not_authorised_eu has, BY CONSTRUCTION, no eu_canonical_id (that
+    absence is precisely why it blocks) -- and, before enrichment, no
+    additive_name either, since src/rules/engine.py can only ever set
+    additive_name from an eu_fip row. Fast Green FCF (INS 143) is the real
+    example (see src/rules/naming.py's module docstring); item_id 1 here
+    matches _resolved_items()'s "Component A" additive (canonical_ins
+    "300"), so a codex_ins row for "300" is what enrich_additive_names has
+    to find via THAT resolved item, not this ItemVerdict directly -- the
+    ItemVerdict alone has nothing left to key off once eu_canonical_id is
+    null."""
+    item = ItemVerdict(
+        item_id=1,
+        eu_canonical_id=None,
+        additive_name=None,
+        component_label="Component A",
+        by_category=[],
+        headline="not_authorised_eu",
+        category_sensitive=False,
+        verdict_certainty="certain",
+        flags=["not_in_eu_list"],
+    )
+    return ProductVerdict(
+        items=[item],
+        blocking=[1],
+        category_conflict=[],
+        review_required=[],
+        category_sensitive_items=[],
+        summary="1 item(s) evaluated. 1 item(s) NOT PERMITTED.",
+        category_used={"Component A": "1.1"},
+        category_source={"Component A": "user"},
+        warnings=[],
+        data_version="test",
+    )
+
+
 def _fake_substitutes() -> SubstituteResult:
     return SubstituteResult(suggestions=[], warnings=["substitutes ran"])
 
@@ -238,7 +280,7 @@ def _mock_pure_functions(monkeypatch):
     monkeypatch.setattr(nodes_module, "narrate", lambda *a, **k: _fake_narration())
 
 
-def _build_test_graph(auto_confirm: bool, news_provider=None, news_cache_path=None):
+def _build_test_graph(auto_confirm: bool, news_provider=None, news_cache_path=None, codex_ins=None):
     # news_provider defaults to None (the "no key configured" degrade
     # path -- see make_news_node's docstring): no network, no cache file
     # touched, {"news_signals": []} every time -- news_cache_path is never
@@ -250,13 +292,18 @@ def _build_test_graph(auto_confirm: bool, news_provider=None, news_cache_path=No
     # would otherwise write a stray file into the repo root.
     if news_provider is not None and news_cache_path is None:
         raise ValueError("news_cache_path is required whenever news_provider is not None")
+    # codex_ins defaults to [] -- make_verdict_node's own enrich_additive_names
+    # call is harmless against the fixture verdicts most tests use (their
+    # one item already has additive_name set, so enrichment is a no-op);
+    # test_verdict_node_enriches_unnamed_item_via_codex_ins passes a real
+    # one to exercise the Codex-fallback path specifically.
     config = CONFIGS["baseline"]
     graph = StateGraph(PipelineState)
     graph.add_node("extract", make_extract_node(Mock()))
     graph.add_node("resolve", make_resolve_node(Mock()))
     graph.add_node("classify", make_classify_node({}, {}, Mock(), [], config))
     graph.add_node("confirm", make_confirm_node(auto_confirm))
-    graph.add_node("verdict", make_verdict_node([], {"1.1": "Category for Component A"}))
+    graph.add_node("verdict", make_verdict_node([], {"1.1": "Category for Component A"}, codex_ins or []))
     graph.add_node("substitutes", make_substitutes_node([], []))
     graph.add_node("horizon", make_horizon_node([], {}))
     graph.add_node("news", make_news_node(news_provider, news_cache_path or Path("unreachable.json"), "fake-model"))
@@ -363,6 +410,44 @@ def test_confirmed_category_reaches_evaluate_as_an_override(monkeypatch):
     assert captured["category_results"][3].top3[0].code == "8.8"  # the confirmed code, not the retrieved rank-1 ("2.1")
     # Component A was never confirmed -- its item still sees the RETRIEVED top3, unchanged.
     assert captured["category_results"][1].top3[0].code == "1.1"
+
+
+def test_verdict_node_enriches_unnamed_item_via_codex_ins(monkeypatch):
+    # THE bug make_verdict_node's codex_ins argument exists to fix: an item
+    # blocked as not_authorised_eu comes out of evaluate() with BOTH
+    # eu_canonical_id and additive_name null (see
+    # _fake_verdict_with_unnamed_blocked_item's own docstring). Before
+    # src/rules/naming.py was wired into verdict_node, state["verdict"] --
+    # and therefore narrate_node's input -- kept that null name; only
+    # app.py's OWN post-hoc enrichment (too late for the graph path) fixed
+    # it for display. This calls make_verdict_node directly, not through
+    # the full graph, since interrupt/confirm/classify machinery has
+    # nothing to do with what is being tested here. evaluate() is mocked
+    # (no real rules engine needed); enrich_additive_names/extraction_names
+    # are NOT -- this test exists specifically to run the real ones.
+    monkeypatch.setattr(nodes_module, "evaluate", lambda *a, **k: _fake_verdict_with_unnamed_blocked_item())
+
+    codex_ins = [{"ins": "300", "name": "Fast Green FCF"}]
+    verdict_node = make_verdict_node([], {"1.1": "Category for Component A"}, codex_ins)
+
+    state = {
+        "resolution": {
+            "items": [item.model_dump() for item in _resolved_items()],
+            "warnings": [],
+            "index_version": "test",
+        },
+        "extraction": _fake_extraction_payload(),
+        "category": {},
+        "confirmed_categories": {},
+    }
+    result = verdict_node(state)
+
+    assert "errors" not in result
+    item = result["verdict"]["items"][0]
+    # eu_canonical_id stays null -- that is the correct, unchanged reason
+    # this item blocks; enrichment only ever touches additive_name.
+    assert item["eu_canonical_id"] is None
+    assert item["additive_name"] == "Fast Green FCF (INS 300)"
 
 
 def test_substitutes_and_horizon_both_run_and_both_reach_narrate(monkeypatch):

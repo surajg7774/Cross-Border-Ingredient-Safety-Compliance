@@ -72,6 +72,8 @@ from src.report.narrator import Narration, narrate
 from src.resolve.resolver import References, resolve_items
 from src.resolve.schemas import ResolutionResult, ResolvedItem
 from src.rules.engine import evaluate
+from src.rules.naming import enrich_additive_names as _enrich_additive_names
+from src.rules.naming import extraction_names as _extraction_names
 from src.rules.schemas import ProductVerdict
 from src.schemas import GateResult
 from src.substitutes.advisor import find_substitutes
@@ -385,12 +387,13 @@ def _finalise_graph(choices: dict[str | None, CategoryCandidate]) -> None:
     """The graph-backed twin of _finalise: resume confirm_node's interrupt
     with the chosen categories, then read verdict/substitutes/horizon/
     narration straight off the returned state -- src/graph/nodes.py already
-    ran evaluate/find_substitutes/find_horizon_signals/narrate for us. Only
-    the display-only enrichment/preview steps below (additive-name
-    backfill, the pre-confirmation preview verdict) are NOT something a
-    node does -- same as _finalise, these are app.py's own display
-    concerns, not compliance logic, so they are recomputed here exactly as
-    _finalise already does.
+    ran evaluate/find_substitutes/find_horizon_signals/narrate for us, and
+    verdict_node already backfilled additive_name (src/rules/naming.py)
+    before any of them saw the verdict, so narration and the screen agree
+    on names for free. Only the pre-confirmation preview verdict below is
+    NOT something a node does -- same as _finalise, that one is app.py's
+    own display concern, not compliance logic, so it is recomputed here
+    exactly as _finalise already does.
 
     If this is a RE-confirmation (the user went back and is confirming a
     different choice), the original thread's interrupt is already resolved
@@ -413,14 +416,10 @@ def _finalise_graph(choices: dict[str | None, CategoryCandidate]) -> None:
     refs = _load_references()
     resolved_items = [ResolvedItem.model_validate(i) for i in result["resolution"]["items"]]
     resolved_by_id = {r.item_id: r for r in resolved_items}
-    canonical_ins_by_item = {r.item_id: r.canonical_ins for r in resolved_items if r.canonical_ins}
-    codex_names = {row["ins"]: row["name"] for row in refs.codex_ins}
     extraction_items = result["extraction"]["extraction"]["items"]
     item_labels = item_component_labels(extraction_items, resolved_by_id)
 
     verdict = ProductVerdict.model_validate(result["verdict"])
-    extraction_names = _extraction_names(result["extraction"])
-    verdict = _enrich_additive_names(verdict, extraction_names, canonical_ins_by_item, codex_names)
 
     # DISPLAY ONLY -- same purpose as _finalise's own preview_verdict (see
     # its comment): the pre-confirmation candidates, recomputed with the
@@ -485,68 +484,6 @@ def _save_upload(uploaded) -> Path:
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(uploaded.getvalue())
     return Path(tmp.name)
-
-
-def _extraction_names(extraction_payload: dict) -> dict[int, str]:
-    """item_id -> a display name, falling back to verbatim -- for items
-    whose additive_name is null (unresolved/ambiguous items have no eu_fip
-    row to draw a name from). Same fallback scripts/verdict.py uses."""
-    items = extraction_payload["extraction"]["items"]
-    names = {}
-    for item in items:
-        name = item.get("name_as_declared") or item.get("verbatim")
-        if name:
-            names[item["item_id"]] = name
-    return names
-
-
-def _enrich_additive_names(
-    verdict: ProductVerdict,
-    extraction_names: dict[int, str],
-    canonical_ins_by_item: dict[int, str],
-    codex_names: dict[str, str],
-) -> ProductVerdict:
-    """A copy of `verdict` with every item's additive_name backfilled:
-
-        additive_name = eu_fip name (already set, kept as-is)
-                        else Codex INS name (e.g. INS 143 -> "Fast Green FCF",
-                             absent from eu_fip -- that absence is WHY it
-                             blocks, but Codex still knows the substance)
-                        else name_as_declared / verbatim (the label's own
-                             wording, via `extraction_names`)
-
-    additive_name is a pure display field -- nothing in src/rules/ or
-    src/substitutes/ branches on whether it is None (eu_fip presence is
-    signalled by eu_canonical_id/flags instead) -- so enriching it here,
-    ONCE, before find_substitutes()/narrate() ever see the verdict, fixes
-    every downstream surface (substitutes' blocked_name, the narrator's
-    JSON, every export, every screen) without changing any of their own
-    code: they already treat additive_name as their first-choice name.
-
-    An item resolved via the CODEX fallback tier gets its code folded into
-    the name itself -- "Fast Green FCF (INS 143)", not just "Fast Green
-    FCF" -- for the same reason: the code is how a user cross-references
-    their own specification, and ItemVerdict deliberately does not carry
-    canonical_ins (see src/substitutes/advisor.py's docstring), so this is
-    the one place with both the Codex name AND the code in hand at once.
-    An item WITH an eu_canonical_id already gets its E-number shown
-    separately (the verdict strip's own code_html) -- folding it into the
-    name too would duplicate it, so only the Codex-fallback tier does this.
-    """
-    items = []
-    for item in verdict.items:
-        name = item.additive_name
-        if not name:
-            canonical_ins = canonical_ins_by_item.get(item.item_id)
-            codex_name = codex_names.get(canonical_ins) if canonical_ins else None
-            if codex_name:
-                name = f"{codex_name} (INS {canonical_ins})"
-        if not name:
-            name = extraction_names.get(item.item_id)
-        if name and name != item.additive_name:
-            item = item.model_copy(update={"additive_name": name})
-        items.append(item)
-    return verdict.model_copy(update={"items": items})
 
 
 def _category_summary(verdict: ProductVerdict) -> str:

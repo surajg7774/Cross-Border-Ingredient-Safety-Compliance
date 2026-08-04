@@ -183,7 +183,7 @@ def build_pipeline(
         make_classify_node(categories, embeddings, embedder, refs.eu_fip, category_config, chroma_index=chroma_index),
     )
     graph.add_node("confirm", make_confirm_node(auto_confirm))
-    graph.add_node("verdict", make_verdict_node(refs.eu_fip, refs.category_names))
+    graph.add_node("verdict", make_verdict_node(refs.eu_fip, refs.category_names, refs.codex_ins))
     graph.add_node("substitutes", make_substitutes_node(refs.eu_fip, refs.codex_ins))
     graph.add_node("horizon", make_horizon_node(refs.horizon_signals, refs.horizon_meta))
     graph.add_node("news", make_news_node(search_provider, NEWS_CACHE_PATH, model_id))
