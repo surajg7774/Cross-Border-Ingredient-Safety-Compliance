@@ -126,6 +126,31 @@ def _content_words(name: str) -> list[str]:
     return [w for w in _normalise_text(name).lower().split() if len(w) >= _MIN_STEM_LENGTH]
 
 
+# MEASURED against a live Tavily response (query: "Titanium dioxide"): a
+# result scoring 0.52 was an EFSA sweeteners working-group minutes PDF
+# that mentions titanium dioxide only as the reason another agenda item
+# was deprioritised -- not actually about it. It sits on an allowed
+# domain (efsa.europa.eu) and contains the additive's name verbatim, so
+# it survives BOTH domain restriction and is_relevant() unchanged: this
+# is the exact gap neither of those can close, since both check WHERE a
+# result is from and WHETHER it mentions the additive, never HOW CENTRAL
+# the additive is to it. Score is the only signal left. 0.6 is a starting
+# threshold (comfortably above the measured 0.52 false-positive, not yet
+# tuned against a larger sample) -- revisit once more real queries exist
+# to check it against.
+_MIN_RELEVANCE_SCORE = 0.6
+
+
+def meets_score_threshold(result: SearchResult) -> bool:
+    """True if `result`.score is at least _MIN_RELEVANCE_SCORE. A result
+    with no score at all (score is None) fails the threshold -- absence
+    of a signal is not evidence of relevance, so it is never treated as a
+    free pass. Applied BEFORE is_relevant (see passes_prefilter) --
+    score and keyword relevance catch different failure modes and
+    neither substitutes for the other."""
+    return result.score is not None and result.score >= _MIN_RELEVANCE_SCORE
+
+
 def is_relevant(result: SearchResult, additive_name: str) -> bool:
     """True if `result`'s title+content contains the additive's name, or a
     recognisable stem of it, as a WHOLE WORD -- not a bare substring, so a
@@ -134,10 +159,20 @@ def is_relevant(result: SearchResult, additive_name: str) -> bool:
     (src/horizon/search.py's include_domains) narrows the SOURCE a result
     comes from, not its TOPIC; a regulatory-domain page about an unrelated
     substance is still a real failure mode this catches cheaply, for
-    free, before spending a model call on it."""
+    free, before spending a model call on it. Does NOT catch "on-topic
+    but not central" (see meets_score_threshold for that gap)."""
     haystack = _normalise_text(f"{result.title} {result.content}").lower()
     candidates = _content_words(additive_name) or [_normalise_text(additive_name).lower()]
     return any(re.search(rf"\b{re.escape(word)}\b", haystack) for word in candidates)
+
+
+def passes_prefilter(result: SearchResult, additive_name: str) -> bool:
+    """meets_score_threshold AND is_relevant, in that order -- the
+    ordering named in this function's own existence rather than left to
+    whichever a future call site happens to check first. Both run before
+    anything reaches the model; neither alone catches what the other
+    does (see each function's own docstring)."""
+    return meets_score_threshold(result) and is_relevant(result, additive_name)
 
 
 def _build_classify_prompt(additive_name: str, result: SearchResult) -> str:
@@ -257,7 +292,11 @@ def build_news_signal(
         category=category,
         quoted_span=quoted_span,
         source_url=result.url,
-        published_date=result.published_date,
+        # NewsSignal.published_date is str | None (schemas.py, unchanged
+        # by this correction) -- SearchResult.published_date is now a
+        # parsed date; isoformat() here, not str(), so the stored value
+        # is unambiguous regardless of how a date happens to str()-format.
+        published_date=result.published_date.isoformat() if result.published_date else None,
         search_query=search_query,
         retrieved_at=retrieved_at,
         severity="advisory",

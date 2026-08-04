@@ -52,25 +52,53 @@ per label (one per additive), relying on a default that could change
 underneath this code would silently double cost and latency. See
 _SEARCH_DEPTH below.
 
+SEARCH TOPIC IS ALWAYS "news", explicit and required, same reasoning as
+search depth -- VERIFIED against a live call, not assumed: without
+topic="news", Tavily's response has no published_date field AT ALL; with
+it, published_date is present but as RFC 2822 text ("Tue, 10 Mar 2026
+00:00:00 GMT"), not ISO. Every date-parsing decision below assumes this
+topic is always set -- see _parse_tavily_date and _SEARCH_TOPIC.
+
+INCLUDE_ANSWER IS ALWAYS EXPLICITLY False, and the response is asserted
+to honour it. Tavily's top-level response carries query,
+follow_up_questions, answer, images, results, response_time, request_id
+(confirmed live) -- `answer` is Tavily's OWN generated summary of the
+results, and this lane must never receive it: constraint 3 (see the
+horizon-news design report) is that the model gets at most one neutral,
+verbatim-quoted sentence per retrieved item, produced by THIS project's
+own classify-and-quote step, never a third party's summary sitting
+upstream of it where it could leak into a prompt unexamined. Not
+requesting it is not enough on its own -- TavilySearchProvider.search()
+raises if `answer` ever comes back non-null anyway, so a future default
+change on Tavily's side fails loudly instead of quietly handing an
+unvetted summary to whatever reads SearchResult next.
+
 STALE/DEAD LINKS: Tavily can return stale or dead links from its own
 cache, and its response carries no direct "this is stale" signal to key
 off. validate_search_result uses the best available proxy instead: URL
-well-formedness (a real scheme and netloc) and the presence of a
-published date. A result that fails either check is FLAGGED, not
-dropped -- the caller still gets to see it and decide, with the problem
+well-formedness (a real scheme and netloc), the presence of a published
+date, and now whether a present date actually PARSED (see
+_UNPARSEABLE_DATE_FLAG) -- a result failing any of these is FLAGGED, not
+dropped, so the caller still gets to see it and decide, with the problem
 named rather than the result silently vanishing. This is a proxy, not a
-verified staleness detector, and should be revisited once real Tavily
-responses exist to study.
+verified staleness detector, and should be revisited as more real Tavily
+responses are studied.
 
-UNVERIFIED, written from Tavily's published API documentation, not a
-live response: TavilySearchProvider's exact request/response shape
-(Bearer auth in the Authorization header, the response's "results" list
-and each item's field names) has not been confirmed against a real call.
-Treat it as a first draft to check against a real response before it is
-ever wired up for real use.
+VERIFIED against a live response (query: "Titanium dioxide"): result
+field names are title, url, content, published_date, score -- exactly
+what TavilySearchProvider.search() already parsed. Also verified: a
+result can be topically ON-DOMAIN and NAME-MATCHING and still not be
+about the additive at all -- the same live query returned an EFSA
+sweeteners working-group minutes PDF at score 0.52 that mentions
+titanium dioxide only as the reason another agenda item was
+deprioritised. Domain restriction and is_relevant() (src/horizon/
+news.py) cannot close this gap; only the score can. See
+news.py's _MIN_RELEVANCE_SCORE.
 """
 
 from dataclasses import dataclass, field, replace
+from datetime import date
+from email.utils import parsedate_to_datetime
 from typing import Protocol
 from urllib.parse import urlparse
 
@@ -82,9 +110,33 @@ _TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 # can't silently double this project's cost or latency. See this module's
 # docstring, "SEARCH DEPTH IS ALWAYS 'basic'".
 _SEARCH_DEPTH = "basic"
+# Required for published_date to be present at all -- see this module's
+# docstring, "SEARCH TOPIC IS ALWAYS 'news'".
+_SEARCH_TOPIC = "news"
+# Explicit, not relied on as Tavily's default -- see this module's
+# docstring, "INCLUDE_ANSWER IS ALWAYS EXPLICITLY False". Response is
+# still asserted to honour this; see TavilySearchProvider.search().
+_INCLUDE_ANSWER = False
 
 _MALFORMED_URL_FLAG = "malformed_source_url"
 _NO_PUBLISHED_DATE_FLAG = "no_published_date"
+_UNPARSEABLE_DATE_FLAG = "unparseable_published_date"
+
+
+def _parse_tavily_date(raw: str | None) -> date | None:
+    """`raw` (Tavily's RFC 2822 published_date, e.g. "Tue, 10 Mar 2026
+    00:00:00 GMT" -- MEASURED against a live response, not assumed) to a
+    plain date, or None if `raw` is absent or does not parse. The
+    ORIGINAL string is kept regardless (SearchResult.published_date_raw)
+    so a parse failure is a flaggable, visible fact
+    (_UNPARSEABLE_DATE_FLAG in validate_search_result), not silently
+    indistinguishable from a date that was never present at all."""
+    if not raw:
+        return None
+    try:
+        return parsedate_to_datetime(raw).date()
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -96,7 +148,8 @@ class SearchResult:
     title: str
     url: str
     content: str
-    published_date: str | None
+    published_date: date | None  # parsed from Tavily's RFC 2822 text; None if absent or unparseable
+    published_date_raw: str | None  # exactly what the provider returned, always kept
     score: float | None
     # Populated by validate_search_result, never by a provider itself --
     # see this module's docstring on why the two are kept separate.
@@ -151,7 +204,12 @@ class TavilySearchProvider:
     def search(
         self, query: str, *, include_domains: list[str] | None = None, days: int | None = None
     ) -> list[SearchResult]:
-        payload: dict[str, object] = {"query": query, "search_depth": _SEARCH_DEPTH}
+        payload: dict[str, object] = {
+            "query": query,
+            "search_depth": _SEARCH_DEPTH,
+            "topic": _SEARCH_TOPIC,
+            "include_answer": _INCLUDE_ANSWER,
+        }
         if include_domains:
             payload["include_domains"] = include_domains
         if days is not None:
@@ -166,16 +224,32 @@ class TavilySearchProvider:
         response.raise_for_status()
         data = response.json()
 
-        return [
-            SearchResult(
-                title=item.get("title") or "",
-                url=item.get("url") or "",
-                content=item.get("content") or "",
-                published_date=item.get("published_date"),
-                score=item.get("score"),
+        # Requesting include_answer=False is not enough on its own -- see
+        # this module's docstring, "INCLUDE_ANSWER IS ALWAYS EXPLICITLY
+        # False". A non-null answer here means Tavily's own summary would
+        # otherwise flow straight to whatever reads SearchResult next,
+        # which constraint 3 (the horizon-news design report) rules out
+        # entirely -- fail loudly rather than let that happen quietly.
+        if data.get("answer") is not None:
+            raise RuntimeError(
+                "Tavily response included a non-null 'answer' field -- this lane must never receive "
+                "Tavily's own generated summary. Check that include_answer is not being requested."
             )
-            for item in data.get("results", [])
-        ]
+
+        results = []
+        for item in data.get("results", []):
+            raw_date = item.get("published_date")
+            results.append(
+                SearchResult(
+                    title=item.get("title") or "",
+                    url=item.get("url") or "",
+                    content=item.get("content") or "",
+                    published_date=_parse_tavily_date(raw_date),
+                    published_date_raw=raw_date,
+                    score=item.get("score"),
+                )
+            )
+        return results
 
 
 def _is_well_formed_url(url: str) -> bool:
@@ -193,17 +267,23 @@ def _is_well_formed_url(url: str) -> bool:
 
 def validate_search_result(result: SearchResult) -> SearchResult:
     """`result` with flags set for a malformed source_url and/or a
-    missing published_date -- the best available proxy for "this looks
-    stale" given Tavily's response carries no direct staleness signal
-    (see this module's docstring). Never drops a result for failing
-    either check; a caller decides what to do with a flagged one, same
+    missing or unparseable published_date -- the best available proxy for
+    "this looks stale" given Tavily's response carries no direct
+    staleness signal (see this module's docstring). A date that is
+    PRESENT (published_date_raw is set) but failed to parse
+    (published_date is None) is flagged _UNPARSEABLE_DATE_FLAG, distinct
+    from a date that was never returned at all (_NO_PUBLISHED_DATE_FLAG)
+    -- the two are different failures worth telling apart: one is Tavily
+    returning nothing, the other is this project's own parser not
+    understanding what Tavily returned. Never drops a result for failing
+    any check; a caller decides what to do with a flagged one, same
     discipline as src/horizon/schemas.py's HorizonSignal.flags
     (matched_by_name, doi_unverified) -- named, not hidden."""
     flags = list(result.flags)
     if not _is_well_formed_url(result.url):
         flags.append(_MALFORMED_URL_FLAG)
-    if not result.published_date:
-        flags.append(_NO_PUBLISHED_DATE_FLAG)
+    if result.published_date is None:
+        flags.append(_UNPARSEABLE_DATE_FLAG if result.published_date_raw else _NO_PUBLISHED_DATE_FLAG)
     if flags == result.flags:
         return result
     return replace(result, flags=flags)

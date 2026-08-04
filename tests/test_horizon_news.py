@@ -4,6 +4,7 @@ same pattern tests/test_narrator.py uses for src/report/narrator.py;
 nothing here calls a real model."""
 
 import json
+from datetime import date
 
 import pytest
 from pydantic import ValidationError
@@ -14,6 +15,8 @@ from src.horizon.news import (
     check_modality_backstop,
     classify_and_quote,
     is_relevant,
+    meets_score_threshold,
+    passes_prefilter,
     render_news_sentence,
 )
 from src.horizon.schemas import NewsSignal
@@ -25,7 +28,8 @@ def _result(title="EFSA opens review of Titanium dioxide", content="The panel wi
         "title": title,
         "url": "https://efsa.europa.eu/example",
         "content": content,
-        "published_date": "2026-06-01",
+        "published_date": date(2026, 6, 1),
+        "published_date_raw": "Mon, 01 Jun 2026 00:00:00 GMT",
         "score": 0.9,
         "flags": [],
     }
@@ -63,6 +67,57 @@ def test_is_relevant_short_name_falls_back_to_exact_whole_name_match():
 
     result2 = _result(title="Legume prices rise", content="")
     assert is_relevant(result2, "gum") is False  # "legume" contains "gum" as a substring, not a real match
+
+
+# --------------------------------------------------------------------------- #
+# meets_score_threshold / passes_prefilter -- pure, no network
+# --------------------------------------------------------------------------- #
+def test_meets_score_threshold_true_above_the_minimum():
+    result = _result(score=0.6)
+    assert meets_score_threshold(result) is True
+
+
+def test_meets_score_threshold_false_below_the_minimum():
+    result = _result(score=0.59)
+    assert meets_score_threshold(result) is False
+
+
+def test_meets_score_threshold_false_when_score_is_none():
+    result = _result(score=None)
+    assert meets_score_threshold(result) is False
+
+
+def test_meets_score_threshold_rejects_the_measured_efsa_minutes_case():
+    # MEASURED against a live Tavily response (query: "Titanium dioxide"):
+    # an EFSA sweeteners working-group minutes PDF scored 0.52 and
+    # mentions titanium dioxide only as the reason another agenda item
+    # was deprioritised -- on an allowed domain, containing the additive's
+    # name, so it survives is_relevant() unchanged. Score is what actually
+    # catches it.
+    result = _result(
+        title="Minutes of the EFSA Working Group on Sweeteners",
+        content="Discussion of titanium dioxide was deprioritised in favour of other agenda items.",
+        url="https://efsa.europa.eu/sites/default/files/wg-sweeteners-minutes.pdf",
+        score=0.52,
+    )
+    assert is_relevant(result, "Titanium dioxide") is True  # passes keyword relevance...
+    assert meets_score_threshold(result) is False  # ...but fails the score threshold
+    assert passes_prefilter(result, "Titanium dioxide") is False  # so the combined gate rejects it
+
+
+def test_passes_prefilter_true_when_both_checks_pass():
+    result = _result(title="EFSA opens review of Titanium dioxide", score=0.9)
+    assert passes_prefilter(result, "Titanium dioxide") is True
+
+
+def test_passes_prefilter_false_when_only_relevance_passes():
+    result = _result(title="EFSA opens review of Titanium dioxide", score=0.3)
+    assert passes_prefilter(result, "Titanium dioxide") is False
+
+
+def test_passes_prefilter_false_when_only_score_passes():
+    result = _result(title="Unrelated sugar tax update", content="", score=0.9)
+    assert passes_prefilter(result, "Titanium dioxide") is False
 
 
 # --------------------------------------------------------------------------- #
@@ -148,7 +203,7 @@ def test_classify_and_quote_is_case_sensitive(monkeypatch):
 # render_news_sentence -- pure
 # --------------------------------------------------------------------------- #
 def test_render_news_sentence_includes_quote_url_and_date():
-    result = _result(published_date="2026-06-01")
+    result = _result(published_date=date(2026, 6, 1))
     sentence = render_news_sentence("Titanium dioxide", "regulatory_review", "EFSA opens review", result)
     assert "EFSA opens review" in sentence
     assert result.url in sentence
@@ -157,7 +212,7 @@ def test_render_news_sentence_includes_quote_url_and_date():
 
 
 def test_render_news_sentence_omits_date_when_absent():
-    result = _result(published_date=None)
+    result = _result(published_date=None, published_date_raw=None)
     sentence = render_news_sentence("Titanium dioxide", "regulatory_review", "EFSA opens review", result)
     assert "None" not in sentence
 

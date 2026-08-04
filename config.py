@@ -69,5 +69,18 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     SMTP_FROM: str | None = None
 
+    # Optional: the (not-yet-wired) horizon news lane's Tavily API key --
+    # see src/horizon/search.py's module docstring for the provider
+    # decision and for what "not wired" means. Declared here only so
+    # Settings() does not fail to construct when this is present in
+    # .env -- BaseSettings' default extra="forbid" would otherwise reject
+    # any key it doesn't recognise. Nothing reads settings.TAVILY_API_KEY
+    # yet: TavilySearchProvider still takes its key as a plain constructor
+    # argument (see src/report/email.py's send_report for why -- testable
+    # without an environment), not by reading this directly. A
+    # get_search_provider()-style factory that DOES read it is later-stage
+    # work, not this one.
+    TAVILY_API_KEY: str | None = None
+
 
 settings = Settings()

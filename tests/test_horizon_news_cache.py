@@ -12,7 +12,14 @@ from src.horizon.search import SearchResult
 
 
 def _result(url="https://example.com/x"):
-    return SearchResult(title="t", url=url, content="c", published_date="2026-06-01", score=0.9)
+    return SearchResult(
+        title="t",
+        url=url,
+        content="c",
+        published_date=date(2026, 6, 1),
+        published_date_raw="Mon, 01 Jun 2026 00:00:00 GMT",
+        score=0.9,
+    )
 
 
 def _cache_entry(fetched_at, results):
@@ -20,7 +27,15 @@ def _cache_entry(fetched_at, results):
 
 
 def _serialised(r):
-    return {"title": r.title, "url": r.url, "content": r.content, "published_date": r.published_date, "score": r.score, "flags": r.flags}
+    return {
+        "title": r.title,
+        "url": r.url,
+        "content": r.content,
+        "published_date": r.published_date.isoformat() if r.published_date else None,
+        "published_date_raw": r.published_date_raw,
+        "score": r.score,
+        "flags": r.flags,
+    }
 
 
 # --------------------------------------------------------------------------- #

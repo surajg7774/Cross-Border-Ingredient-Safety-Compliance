@@ -485,3 +485,41 @@ NOT-adopted alternative, the same discipline F-11 recorded ChromaDB with --
 (`ExperimentConfig.functional_class_filter: bool = False`), available only
 as the `functional-class-filter-only`/`both-filters` named configs for a
 future, larger eval set to revisit.
+
+## F-22 — EU Agri-Food Fraud Network monthly report: a candidate structured enforcement source, not yet pursued
+
+Surfaced incidentally while verifying the Tavily integration for the
+horizon news lane (`src/horizon/search.py`, `src/horizon/news.py`) against
+the live API: a general web search for an additive can return the
+European Commission's own **Agri-Food Fraud Network monthly summary
+report** (food.ec.europa.eu), which is a genuinely different KIND of
+source from either the curated EFSA dataset (`src/horizon/lane.py`) or
+retrieved trade press (`src/horizon/news.py`) -- it is not an opinion
+about whether an additive MIGHT become a problem, it is a record that one
+already WAS one: actual E-number interceptions, broken down by origin
+country and notifying country, including undeclared colours and (in one
+month's report) an ethylene-oxide case originating from India.
+
+Why this is worth recording separately rather than folding into the news
+lane as just another retrieved result: it is enforcement data, not
+commentary, and it is directly relevant to this project's own users (an
+Indian manufacturer checking EU compliance) in a way EFSA opinions and
+trade press are not -- "was this additive/origin combination actually
+intercepted at the EU border" is a more actionable question than "is EFSA
+reviewing this additive." It also appears to be **structured** (an origin/
+substance/notifying-country table published monthly), not prose to
+retrieve-and-classify the way `src/horizon/news.py`'s pipeline handles a
+Tavily hit -- which suggests it wants its OWN dedicated parser reading the
+Commission's report directly (the same shape of decision RASFF itself
+prompted in the horizon-news design report: query a structured EU source
+directly rather than hope a general web search lands on it), not a
+classify-and-quote treatment built for unstructured retrieval.
+
+**Not pursued.** No code reads this report, no schema represents an
+interception record, and no test exercises it -- this finding exists to
+record that it was seen and looks promising, not to claim it was
+evaluated. Candidate future work: a dedicated parser/schema for Agri-Food
+Fraud Network reports, sitting alongside (not inside) both
+`src/horizon/lane.py`'s curated EFSA source and `src/horizon/news.py`'s
+retrieved-press source, the same three-way separate-provenance shape the
+horizon-news design report argued for between the first two.

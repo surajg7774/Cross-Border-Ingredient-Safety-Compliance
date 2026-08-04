@@ -64,12 +64,17 @@ def _normalise_identity(raw: str) -> str:
 
 
 def _serialise(results: list[SearchResult]) -> list[dict]:
+    # published_date is a date object (src/horizon/search.py) -- not
+    # JSON-serialisable as-is, so it goes to disk as isoformat() text and
+    # comes back via date.fromisoformat() in _deserialise. published_date_raw
+    # is already a plain string (or None) and round-trips unchanged.
     return [
         {
             "title": r.title,
             "url": r.url,
             "content": r.content,
-            "published_date": r.published_date,
+            "published_date": r.published_date.isoformat() if r.published_date else None,
+            "published_date_raw": r.published_date_raw,
             "score": r.score,
             "flags": r.flags,
         }
@@ -83,7 +88,8 @@ def _deserialise(raw: list[dict]) -> list[SearchResult]:
             title=r["title"],
             url=r["url"],
             content=r["content"],
-            published_date=r["published_date"],
+            published_date=date.fromisoformat(r["published_date"]) if r["published_date"] else None,
+            published_date_raw=r.get("published_date_raw"),
             score=r["score"],
             flags=r.get("flags", []),
         )
