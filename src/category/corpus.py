@@ -35,6 +35,21 @@ _PAREN_SUFFIX_RE = re.compile(r"\([^)]*\)$")
 _LETTER_SUFFIX_RE = re.compile(r"[a-z]$", re.IGNORECASE)
 ENRICHED_CLASS_CAP = 10
 
+# MANUALLY CONFIRMED, not detectable by validate_corpus(): 2.3's name is
+# "Vegetable oil pan spray", but its description is entirely about
+# non-dairy creamers/beverage whiteners ("...substitute for milk or cream
+# as an additive to coffee, tea..."). That is category 1.8's subject
+# ("Dairy analogues, including beverage whiteners"), not 2.3's.
+# validate_corpus() only catches a description that cites a bracketed
+# cross-reference code belonging to a different top-level category (e.g.
+# 15 citing "(14.1.1)"); 2.3's mismatch carries no such code, so it passes
+# that check silently. Read directly off the source text, confirmed by
+# hand -- not inferred from a heuristic -- so it is excluded explicitly
+# here rather than left to render as if it described 2.3. No replacement
+# description is invented; 2.3 falls back to name-only, exactly like a
+# category whose description was empty to begin with.
+_KNOWN_BAD_DESCRIPTION_CODES = frozenset({"2.3"})
+
 
 @dataclass
 class FoodCategory:
@@ -149,6 +164,17 @@ def _example_clause(description: str) -> str | None:
         if _EXAMPLE_MARKER_RE.search(sentence):
             return sentence.strip()
     return None
+
+
+def first_sentence(text: str) -> str:
+    """`text`'s first sentence, split the same way _example_clause and
+    _strip_framing already do (_SENTENCE_SPLIT_RE) -- a short, self-
+    contained, grammatical chunk, not a fragment cut mid-word. Public (no
+    leading underscore) because app.py's category confirmation screen
+    uses this same boundary to turn a full description into a one- or
+    two-line chooser summary, and re-deriving the split here rather than
+    re-detecting sentence boundaries independently keeps the two in sync."""
+    return _SENTENCE_SPLIT_RE.split(text)[0].strip()
 
 
 def _strip_framing(text: str) -> str:
@@ -357,7 +383,7 @@ def build_corpus(
     """
     categories = parse_food_categories(raw)
     flags = validate_corpus(categories)
-    flagged_codes = {f.code for f in flags}
+    flagged_codes = {f.code for f in flags} | _KNOWN_BAD_DESCRIPTION_CODES
     cleaned = [
         FoodCategory(
             code=c.code,

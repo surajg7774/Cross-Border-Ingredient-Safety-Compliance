@@ -48,7 +48,7 @@ from config import settings
 from src.agent.resolver_agent import AgentProposal, make_gemini_llm, resolve_review_item
 from src.agent.tools import AgentRefs, build_tools
 from src.category.classifier import build_queries, classify, item_component_labels
-from src.category.corpus import build_corpus
+from src.category.corpus import build_corpus, first_sentence
 from src.category.embedder import GeminiEmbedder
 from src.category.experiment import CONFIGS
 from src.category.schemas import CategoryCandidate, CategoryResult
@@ -909,6 +909,42 @@ def _merge_preview_candidates(authoritative: ProductVerdict, preview: ProductVer
     return display
 
 
+# A chooser needs one or two lines, not a reference. MEASURED: first-
+# sentence length across all 155 categories' descriptions ranges from 39
+# to 1087 characters (median 151) -- most fit comfortably, but the first
+# sentence ALONE is not a safe truncation bound on its own, so a second,
+# word-boundary cut backs it up.
+_DESCRIPTION_DISPLAY_LIMIT = 200
+
+
+def _short_description(description: str | None) -> str | None:
+    """A candidate's description cut to its first sentence
+    (src.category.corpus.first_sentence), and -- for the rare description
+    whose first sentence alone still exceeds _DESCRIPTION_DISPLAY_LIMIT --
+    cut again at the nearest word boundary with a trailing ellipsis. None
+    when there is nothing usable to show (no description in the source,
+    or one excluded by src.category.corpus's validate_corpus /
+    _KNOWN_BAD_DESCRIPTION_CODES) -- the caller falls back to the bare
+    category name rather than a placeholder standing in for absent text.
+    """
+    if not description:
+        return None
+    sentence = first_sentence(description)
+    if len(sentence) <= _DESCRIPTION_DISPLAY_LIMIT:
+        return sentence
+    return sentence[:_DESCRIPTION_DISPLAY_LIMIT].rsplit(" ", 1)[0] + "…"
+
+
+def _candidate_option_label(candidate: CategoryCandidate, categories: dict) -> str:
+    """"{code} — {name} — {short description}" for a radio option, or just
+    "{code} — {name}" when this category has no usable description.
+    Deliberately carries no similarity score -- see render_category_
+    confirmation's "What was searched" expander for where that moved."""
+    base = f"{candidate.code} — {candidate.name}"
+    short = _short_description(categories[candidate.code].description)
+    return f"{base} — {short}" if short else base
+
+
 def render_category_confirmation() -> None:
     # Same spacer div the results screen's own nav row uses (below the top
     # of the page, not flush against it) -- see render_results.
@@ -939,15 +975,30 @@ def render_category_confirmation() -> None:
     for i, result in enumerate(category_results):
         label = result.component_label or "Whole product"
         st.markdown(f"#### {label}")
-        st.caption(f"Query: {result.query.text}")
 
-        radio_options = [
-            f"{c.code} — {c.name}  (score {c.similarity:.2f})" for c in result.top3
-        ]
+        radio_options = [_candidate_option_label(c, categories) for c in result.top3]
         chosen_label = st.radio(
             "Top match", radio_options, index=0, key=f"cat_radio_{i}", label_visibility="collapsed"
         )
         chosen = result.top3[radio_options.index(chosen_label)]
+
+        # Developer-facing detail, collapsed and out of the way rather
+        # than a header line above the choice: the raw retrieval query
+        # (WHY these three were suggested), plus the similarity score each
+        # candidate's option used to show inline -- removed from the
+        # user-facing options because 0.63 vs 0.63 is not a difference a
+        # non-expert can act on, and a near-tie actively implies a choice
+        # that isn't really there. Kept here, not deleted, since it is
+        # still the right place to debug a bad retrieval. Each
+        # candidate's FULL (untruncated) description lives here too --
+        # the option above only ever shows a one- or two-line cut of it.
+        with st.expander("What was searched"):
+            st.caption(f"Query: {result.query.text}")
+            for c in result.top3:
+                st.markdown(f"**{c.code} — {c.name}** (similarity {c.similarity:.2f})")
+                full_description = categories[c.code].description
+                if full_description:
+                    st.caption(full_description)
 
         with st.expander("Choose another category"):
             override_label = st.selectbox(

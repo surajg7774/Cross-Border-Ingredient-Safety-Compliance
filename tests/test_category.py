@@ -17,7 +17,7 @@ from src.category.classifier import (
     reciprocal_rank_fusion,
     top_k,
 )
-from src.category.corpus import build_corpus, parse_food_categories, validate_corpus
+from src.category.corpus import build_corpus, first_sentence, parse_food_categories, validate_corpus
 from src.category.embedder import _cache_key, _legacy_cache_key
 from src.category.experiment import CONFIGS, ExperimentConfig
 from src.category.filter import permitted_in
@@ -102,6 +102,36 @@ def test_validate_corpus_flags_category_15_wrong_description():
     _, documents, _ = build_corpus(raw)
     assert "carbonated waters" not in documents["15"]
     assert "Ready-to-eat savouries and snacks" in documents["15"]  # name is kept
+
+
+def test_build_corpus_excludes_known_bad_description_for_2_3():
+    # 2.3's real description (data/reference/food_categories.json) is
+    # entirely about non-dairy creamers/beverage whiteners -- category
+    # 1.8's subject, not 2.3's "Vegetable oil pan spray" -- and carries no
+    # bracketed cross-reference code, so validate_corpus() cannot catch
+    # it. _KNOWN_BAD_DESCRIPTION_CODES excludes it explicitly; this locks
+    # that in against the real category tree, not a synthetic stand-in,
+    # since the whole point is a specific, confirmed code.
+    import json
+
+    from config import settings
+
+    with open(settings.REFERENCE_DIR / "food_categories.json", encoding="utf-8") as f:
+        raw = json.load(f)
+    categories, documents, flags = build_corpus(raw)
+    assert categories["2.3"].description is None
+    assert "non-dairy" not in documents["2.3"]
+    assert "Vegetable oil pan spray" in documents["2.3"]  # name is kept
+    # validate_corpus's own mechanical check genuinely does not catch this
+    # one -- the exclusion is manual, not a gap in the flags return value.
+    assert "2.3" not in {f.code for f in flags}
+
+
+def test_first_sentence_splits_at_sentence_boundary():
+    assert first_sentence("Fruits and vegetables presented fresh from harvest.") == (
+        "Fruits and vegetables presented fresh from harvest."
+    )
+    assert first_sentence("Starch is a polymer. It occurs in granular form.") == "Starch is a polymer."
 
 
 # --------------------------------------------------------------------------- #
