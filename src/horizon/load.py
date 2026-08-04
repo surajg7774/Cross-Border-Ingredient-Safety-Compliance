@@ -1,8 +1,11 @@
-# DESIGN RULE: this is the one I/O boundary in src/horizon/ -- it opens and
+# DESIGN RULE: this is the FILE I/O boundary in src/horizon/ -- it opens and
 # reads a real file, the same role src/category/embedder.py plays for its
 # stage. src/horizon/lane.py, the decision logic, stays pure (data in, data
 # out, no printing); this module exists precisely so lane.py never has to
-# know how to read a file.
+# know how to read a file. src/horizon/search.py is a SEPARATE, network I/O
+# boundary for the (not-yet-wired) news-retrieval lane -- see that module's
+# docstring; this one is no longer the only I/O in the package, just the
+# only FILE I/O.
 """Loader for the curated regulatory-horizon signal dataset at
 data/reference/horizon_signals.json.
 
