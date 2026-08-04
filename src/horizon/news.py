@@ -2,13 +2,22 @@
 # (src/horizon/search.py) -- it is the decision/classification logic for
 # the news source, the role lane.py plays for the curated EFSA source.
 # Unlike lane.py, this module is NOT pure end to end: is_relevant,
-# render_news_sentence, and check_modality_backstop are pure; classify_and_
-# quote calls a model (via src.text_generation's TextGenerator seam, same
-# pattern as src/report/narrator.py's _call_model) and is therefore not.
-# STAGE 1: nothing here is called by the graph or the UI yet, and no test
-# in this project calls a real model through this module -- every test
-# monkeypatches _call_model, exactly as tests/test_narrator.py does for
-# src/report/narrator.py.
+# render_news_sentence, check_modality_backstop, and find_news_signals
+# itself are pure (data -- including the provider and cache -- in, data
+# out, no settings access); classify_and_quote calls a model (via
+# src.text_generation's TextGenerator seam, same pattern as src/report/
+# narrator.py's _call_model) and is therefore not. find_news_signals ALSO
+# does not import src.rules.schemas -- same reasoning lane.py's own
+# DESIGN RULE gives for find_horizon_signals: it takes plain additive_ids/
+# additive_names, never a ProductVerdict, so this module never needs to
+# know how a verdict is shaped. The caller (src/graph/nodes.py's
+# news_node) extracts those from state["verdict"], exactly as horizon_node
+# already does for find_horizon_signals.
+# STAGE 2: wired into the graph (src/graph/nodes.py's news_node) and the
+# UI (src/ui/components.py). No test in this project calls a real model or
+# a real SearchProvider through this module -- every test monkeypatches
+# _call_model and uses FixtureSearchProvider, exactly as
+# tests/test_narrator.py does for src/report/narrator.py.
 """Turns a retrieved SearchResult into a NewsSignal, or refuses to.
 
 THE CONSTRAINT THIS MODULE EXISTS TO ENFORCE: the model may do at most one
@@ -51,9 +60,11 @@ than repair when a rule assessment implies actual harm:
 import json
 import logging
 import re
+from datetime import date
 
+from src.horizon.news_cache import get_search_results
 from src.horizon.schemas import NewsSignal
-from src.horizon.search import SearchResult
+from src.horizon.search import SearchProvider, SearchResult, validate_search_result
 from src.model_call import strip_markdown_fences
 from src.text_generation import get_text_generator
 
@@ -65,6 +76,51 @@ log = logging.getLogger("horizon.news")
 # articles; a name with no word this long falls back to requiring the
 # exact whole name (see is_relevant).
 _MIN_STEM_LENGTH = 4
+
+# QUOTA CAPS -- named, not implicit. A 12-additive label must not silently
+# become 12 searches plus 36+ model calls.
+#
+# MAX_ADDITIVES_PER_RUN: one search per DISTINCT additive (never per item
+# -- see find_news_signals), capped at 12 -- this project has already
+# measured/cited "12+ searches for one screening" as the realistic ceiling
+# for a composite label (the horizon-news design report), so 12 covers the
+# whole label without needing an unbounded loop. Additives beyond the cap
+# are simply not searched this run -- see find_news_signals' docstring for
+# what that means for coverage (the SAME "partial, not comprehensive"
+# discipline lane.py already applies to the curated EFSA dataset).
+MAX_ADDITIVES_PER_RUN = 12
+# MAX_RESULTS_CLASSIFIED_PER_ADDITIVE: classify_and_quote is one model
+# call per SearchResult -- classifying every result Tavily returns for an
+# additive (its "basic" search_depth can return several) would make each
+# additive's OWN cost unbounded regardless of the additive cap above. 3
+# keeps a full 12-additive run to at most 12 searches + 36 model calls,
+# not "12 searches + however many results each one happened to return".
+MAX_RESULTS_CLASSIFIED_PER_ADDITIVE = 3
+
+# Domain allowlist from the horizon-news design report's query-
+# construction section -- primary/regulatory sources plus the trade press
+# that actually covers EU additive regulation, not the open web. Passed
+# to SearchProvider.search()'s include_domains, not folded into the query
+# text -- domain restriction does more of the real filtering work than
+# query phrasing (see src/horizon/search.py's SearchProvider docstring).
+_INCLUDE_DOMAINS = (
+    "efsa.europa.eu",
+    "food.ec.europa.eu",
+    "ec.europa.eu",
+    "webgate.ec.europa.eu",  # the RASFF portal lives here
+    "foodnavigator.com",
+    "foodingredientsfirst.com",
+    "foodsafetynews.com",
+    "just-food.com",
+    "reuters.com",
+    "apnews.com",
+)
+# Regulatory news is not real-time (see src/horizon/news_cache.py's own
+# TTL reasoning) -- restricting the SEARCH itself to the last year keeps
+# results current without the query missing genuinely recent coverage the
+# way a much narrower window (e.g. 30 days) would on a feature that only
+# runs when a label happens to be screened, not continuously.
+_DEFAULT_DAYS = 365
 
 _CATEGORIES = frozenset(
     {"regulatory_review", "safety_opinion", "market_action", "consumer_alert", "unrelated"}
@@ -303,3 +359,113 @@ def build_news_signal(
         affects_verdict=False,
         flags=list(result.flags),
     )
+
+
+def _build_query(additive_name: str) -> str:
+    """The additive's own display name, not its E-number -- news and trade
+    press overwhelmingly use chemical/common names (see the horizon-news
+    design report's query-construction section). Identity-derived only,
+    never anything product- or label-specific, so the SAME additive
+    produces the SAME query (and therefore the SAME cache key) regardless
+    of which label it showed up on -- see src/horizon/news_cache.py's own
+    docstring on why the cache is keyed on additive identity, not label."""
+    return f"{additive_name} food additive EU regulation"
+
+
+def find_news_signals(
+    additive_ids: list[str],
+    provider: SearchProvider | None,
+    cache: dict,
+    model_id: str,
+    today: date,
+    additive_names: dict[str, str] | None = None,
+) -> tuple[list[NewsSignal], dict]:
+    """News-retrieved signals for `additive_ids`, mirroring find_horizon_
+    signals' shape: additive_ids/additive_names are the SAME plain,
+    verdict-decoupled inputs that function takes (see this module's
+    DESIGN RULE), and the return is a plain value, not a partial mutation
+    -- (signals, updated_cache), so the caller (src/graph/nodes.py's
+    news_node) decides whether/how to persist the cache, exactly as
+    src/horizon/news_cache.py's own get_search_results already returns an
+    updated cache rather than writing one.
+
+    `provider` is None when src/horizon/search.py's get_search_provider()
+    found no configured key -- find_news_signals degrades to (\\[\\],
+    cache) unchanged, no error, exactly like src/horizon/search.py's own
+    "not a silent no-op, but also not a crash" contract for that case.
+
+    For each of at most MAX_ADDITIVES_PER_RUN distinct additive_ids (never
+    per item -- the SAME additive across several items or components in
+    one label is searched once): build the query (_build_query), hit the
+    cache (src/horizon/news_cache.get_search_results, 7-day TTL, stale-
+    serve on a provider failure), validate every raw result
+    (src/horizon/search.validate_search_result), keep the ones that pass
+    passes_prefilter (score AND keyword relevance), classify-and-quote at
+    most MAX_RESULTS_CLASSIFIED_PER_ADDITIVE of the survivors, and build a
+    NewsSignal for each one classify_and_quote/build_news_signal accepts.
+    A cache miss that also fails (get_search_results raises -- provider
+    down, nothing cached yet for this additive) is logged and skipped,
+    not fatal to the rest of the run: one additive's search failing must
+    not lose every other additive's signals.
+
+    `additive_ids` beyond the cap are not searched at all this run --
+    the SAME "partial coverage, stated plainly" discipline lane.py's own
+    coverage warning already applies to the curated EFSA dataset, just
+    without a matching warnings list here (news_signals carries no
+    separate warnings field -- see schemas.py's NewsSignal); logged via
+    this module's own logger instead.
+    """
+    if provider is None:
+        return [], cache
+
+    checked_ids = sorted(set(additive_ids))
+    capped_ids = checked_ids[:MAX_ADDITIVES_PER_RUN]
+    if len(checked_ids) > MAX_ADDITIVES_PER_RUN:
+        log.info(
+            "find_news_signals: %d distinct additives, capped to %d this run: %s",
+            len(checked_ids),
+            MAX_ADDITIVES_PER_RUN,
+            checked_ids[MAX_ADDITIVES_PER_RUN:],
+        )
+
+    additive_names = additive_names or {}
+    signals: list[NewsSignal] = []
+    updated_cache = cache
+
+    for additive_id in capped_ids:
+        additive_name = additive_names.get(additive_id, additive_id)
+        query = _build_query(additive_name)
+
+        def _fetch(query=query):
+            return provider.search(query, include_domains=list(_INCLUDE_DOMAINS), days=_DEFAULT_DAYS)
+
+        try:
+            raw_results, updated_cache, cache_flags = get_search_results(updated_cache, additive_id, _fetch, today)
+        except Exception as exc:  # noqa: BLE001 -- one additive's search failing must not lose the rest
+            log.warning(
+                "find_news_signals: search failed for %s (%s), skipping: %s: %s",
+                additive_name,
+                additive_id,
+                type(exc).__name__,
+                exc,
+            )
+            continue
+
+        validated = [validate_search_result(r) for r in raw_results]
+        candidates = [r for r in validated if passes_prefilter(r, additive_name)]
+        candidates = candidates[:MAX_RESULTS_CLASSIFIED_PER_ADDITIVE]
+
+        for result in candidates:
+            signal = build_news_signal(result, additive_id, additive_name, query, today.isoformat(), model_id)
+            if signal is None:
+                continue
+            if cache_flags:
+                # "stale_cache_served" (src/horizon/news_cache.py) applies
+                # to the whole batch this additive's search returned, not
+                # to one result specifically -- carried onto every signal
+                # built from it so a reader can tell this signal may be
+                # older than the usual 7-day freshness window.
+                signal = signal.model_copy(update={"flags": signal.flags + list(cache_flags)})
+            signals.append(signal)
+
+    return signals, updated_cache

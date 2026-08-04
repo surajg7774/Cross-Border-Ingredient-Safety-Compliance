@@ -36,6 +36,15 @@ class PipelineState(TypedDict):
     verdict: dict | None
     substitutes: dict | None
     horizon: dict | None
+    # A SEPARATE key from "horizon", not a second writer sharing it --
+    # news_node (src/graph/nodes.py) is a THIRD parallel branch alongside
+    # substitutes_node and horizon_node (see make_news_node's own
+    # docstring for the parallel-branch constraint), and only it ever
+    # writes here, so no reducer is needed, unlike "category" above.
+    # Combined with "horizon" into one HorizonResult (src/horizon/
+    # schemas.py's news_signals field) where the graph's output is
+    # actually consumed for display (app.py), not inside the graph itself.
+    news_signals: list | None
     narration: dict | None
     # Populated by a node's own try/except, never by an uncaught exception
     # propagating out of a node -- see each node's docstring in nodes.py.

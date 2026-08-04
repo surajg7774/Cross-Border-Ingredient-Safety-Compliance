@@ -57,6 +57,7 @@ def _empty_state(label_path: str | None, text_input: str | None, name: str, desc
         "verdict": None,
         "substitutes": None,
         "horizon": None,
+        "news_signals": None,
         "narration": None,
         "errors": [],
     }

@@ -252,7 +252,11 @@ def test_email_section_absent_when_smtp_not_configured():
     # disabled, not shown with an explanatory message -- while the
     # downloads above it still render.
     script = _EXPORT_SECTION_SCRIPT.replace("__SMTP_CONFIG__", "None")
-    at = AppTest.from_string(script).run()
+    # `import app` pulls in the full pipeline import chain (now including
+    # src/horizon/search.py, news.py, news_cache.py) -- comfortably under
+    # a real timeout, but occasionally past AppTest's tight 3s default on
+    # a cold import; bumped, not a sign of a hang.
+    at = AppTest.from_string(script).run(timeout=15)
     assert not at.exception
     assert at.expander == []
     assert len(at.download_button) == 3
@@ -267,7 +271,7 @@ def test_email_section_present_when_smtp_configured():
         "app.smtp_config_from_settings = lambda: SmtpConfig("
         "host='smtp.example.com', port=587, user='u', password='p', sender='reports@example.com')",
     )
-    at = AppTest.from_string(script).run()
+    at = AppTest.from_string(script).run(timeout=15)  # see the sibling test's comment on this bump
     assert not at.exception
     assert len(at.expander) == 1
     assert at.expander[0].label == "Email this report"
@@ -294,3 +298,108 @@ def test_no_smtp_credential_fields_remain_in_app_source():
     )
     for snippet in removed_snippets:
         assert snippet not in source, f"{snippet!r} should no longer appear in app.py"
+
+
+# ---- Horizon news signals (src/ui/components.py's render_horizon) -------
+
+_NEWS_SIGNAL = {
+    "eu_canonical_id": "171",
+    "substance_name": "Titanium dioxide",
+    "category": "regulatory_review",
+    "quoted_span": "EFSA opens review of titanium dioxide",
+    "source_url": "https://efsa.europa.eu/example",
+    "published_date": "2026-06-01",
+    "search_query": "Titanium dioxide food additive EU regulation",
+    "retrieved_at": "2026-08-04",
+    "severity": "advisory",
+    "affects_verdict": False,
+    "flags": [],
+}
+
+
+def _render_horizon_script(result: dict) -> str:
+    return f"""
+from src.ui import components
+
+components.render_horizon({result!r})
+"""
+
+
+def test_horizon_renders_nothing_extra_when_news_signals_absent():
+    result = {"signals": [], "checked_ids": [], "warnings": [], "data_version": "test", "data_retrieved": None}
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "From retrieved news" not in markdown_html
+
+
+def test_horizon_renders_news_signal_with_quote_source_and_date():
+    result = {
+        "signals": [],
+        "checked_ids": [],
+        "warnings": [],
+        "data_version": "test",
+        "data_retrieved": None,
+        "news_signals": [_NEWS_SIGNAL],
+    }
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+
+    assert "From retrieved news" in markdown_html
+    assert "not vetted by a person" in markdown_html
+    assert "EFSA opens review of titanium dioxide" in markdown_html  # the verbatim quote
+    assert "https://efsa.europa.eu/example" in markdown_html  # the source link
+    assert "2026-06-01" in markdown_html  # the published date
+    assert "Under regulatory review" in markdown_html  # the category label
+    assert "E171" in markdown_html
+
+
+def test_horizon_news_signal_flags_render_as_a_warning_badge():
+    flagged_signal = {**_NEWS_SIGNAL, "flags": ["stale_cache_served"]}
+    result = {
+        "signals": [],
+        "checked_ids": [],
+        "warnings": [],
+        "data_version": "test",
+        "data_retrieved": None,
+        "news_signals": [flagged_signal],
+    }
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "stale_cache_served" in markdown_html
+    assert "eu-badge warn" in markdown_html
+
+
+def test_horizon_efsa_table_and_news_signals_both_render_and_stay_distinct():
+    result = {
+        "signals": [
+            {
+                "eu_canonical_id": "955",
+                "substance_name": "Sucralose",
+                "stage": "efsa_opinion",
+                "title": "EFSA opinion on sucralose",
+                "publication_date": "2025",
+                "doi": "10.2903/j.efsa.2025.0001",
+                "doi_verified": True,
+                "source_url": "https://doi.org/10.2903/j.efsa.2025.0001",
+                "years_old": 1,
+                "severity": "advisory",
+                "affects_verdict": False,
+                "note": None,
+                "flags": [],
+            }
+        ],
+        "checked_ids": ["955", "171"],
+        "warnings": [],
+        "data_version": "test",
+        "data_retrieved": "2026-08-01",
+        "news_signals": [_NEWS_SIGNAL],
+    }
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "Sucralose" in markdown_html  # the EFSA (curated) signal
+    assert "Titanium dioxide" in markdown_html  # the retrieved news signal
+    assert "From retrieved news" in markdown_html  # the distinct provenance label

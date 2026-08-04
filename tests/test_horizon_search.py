@@ -277,19 +277,39 @@ def test_tavily_provider_raises_if_answer_is_non_null(monkeypatch):
         TavilySearchProvider(api_key="fake-key").search("x")
 
 
-def test_tavily_provider_is_never_constructed_or_called_anywhere_else():
-    # Structural guard for the Stage 1 constraint: nothing in the live
-    # codebase should reference TavilySearchProvider outside this test file
-    # and src/horizon/search.py itself -- it must not be wired to a
-    # factory, a settings key, or a graph node yet.
+def test_tavily_provider_is_never_referenced_outside_src_horizon():
+    # Stage 2: TavilySearchProvider now HAS a real caller -- get_search_
+    # provider(), in this same module -- so the Stage 1 version of this
+    # guard ("outside search.py") no longer holds. Tightened instead to
+    # the real invariant Stage 2 needs: nothing OUTSIDE src/horizon/
+    # (src/graph/nodes.py included) may reference TavilySearchProvider by
+    # name. Every caller goes through get_search_provider(), which is the
+    # only function allowed to construct one.
     import pathlib
     import re
 
     hits = []
     for path in pathlib.Path("src").rglob("*.py"):
-        if path == pathlib.Path("src/horizon/search.py"):
+        if path.parts[:2] == ("src", "horizon"):
             continue
         text = path.read_text(encoding="utf-8")
         if re.search(r"\bTavilySearchProvider\b", text):
             hits.append(str(path))
-    assert hits == [], f"TavilySearchProvider referenced outside search.py: {hits}"
+    assert hits == [], f"TavilySearchProvider referenced outside src/horizon/: {hits}"
+
+
+def test_get_search_provider_returns_none_when_key_absent(monkeypatch):
+    monkeypatch.setattr(search_module.settings, "TAVILY_API_KEY", None)
+    assert search_module.get_search_provider() is None
+
+
+def test_get_search_provider_returns_none_when_key_is_empty_string(monkeypatch):
+    monkeypatch.setattr(search_module.settings, "TAVILY_API_KEY", "")
+    assert search_module.get_search_provider() is None
+
+
+def test_get_search_provider_returns_tavily_provider_when_key_present(monkeypatch):
+    monkeypatch.setattr(search_module.settings, "TAVILY_API_KEY", "fake-key")
+    provider = search_module.get_search_provider()
+    assert isinstance(provider, TavilySearchProvider)
+    assert provider._api_key == "fake-key"

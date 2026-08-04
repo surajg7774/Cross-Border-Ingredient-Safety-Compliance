@@ -33,14 +33,6 @@ class HorizonSignal(BaseModel):
     flags: list[str] = Field(default_factory=list)
 
 
-class HorizonResult(BaseModel):
-    signals: list[HorizonSignal]
-    checked_ids: list[str]  # which additives were looked up
-    warnings: list[str]
-    data_version: str
-    data_retrieved: str | None  # so a stale snapshot is visible
-
-
 class NewsSignal(BaseModel):
     """One retrieved-and-classified news item about an additive -- SEPARATE
     from HorizonSignal, not a superset of it. The two share almost no real
@@ -88,5 +80,24 @@ class NewsSignal(BaseModel):
     # "malformed_source_url" / "no_published_date" carried forward from
     # src/horizon/search.py's validate_search_result -- a quality issue on
     # the underlying SearchResult is not silently dropped just because the
-    # item survived relevance filtering and classification.
+    # item survived relevance filtering and classification. "stale_cache_
+    # served" from src/horizon/news_cache.py when a provider failure fell
+    # back to a past-TTL cache entry (src/horizon/news.find_news_signals).
     flags: list[str] = Field(default_factory=list)
+
+
+class HorizonResult(BaseModel):
+    signals: list[HorizonSignal]
+    checked_ids: list[str]  # which additives were looked up
+    warnings: list[str]
+    data_version: str
+    data_retrieved: str | None  # so a stale snapshot is visible
+    # Retrieved, machine-classified news -- a SEPARATE source from
+    # `signals` above, not merged into it (see NewsSignal's own docstring
+    # for why). Defaults to empty: a HorizonResult built anywhere that
+    # never touches the news lane at all (e.g. app.py's direct-call
+    # fallback paths, which call src/horizon/lane.py's find_horizon_
+    # signals directly, same as before this feature existed) is still a
+    # completely valid HorizonResult, degrading to "no news signals"
+    # rather than failing to construct.
+    news_signals: list[NewsSignal] = Field(default_factory=list)

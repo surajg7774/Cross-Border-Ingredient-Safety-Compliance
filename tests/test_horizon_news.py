@@ -11,16 +11,19 @@ from pydantic import ValidationError
 
 from src.horizon import news as news_module
 from src.horizon.news import (
+    MAX_ADDITIVES_PER_RUN,
+    MAX_RESULTS_CLASSIFIED_PER_ADDITIVE,
     build_news_signal,
     check_modality_backstop,
     classify_and_quote,
+    find_news_signals,
     is_relevant,
     meets_score_threshold,
     passes_prefilter,
     render_news_sentence,
 )
 from src.horizon.schemas import NewsSignal
-from src.horizon.search import SearchResult
+from src.horizon.search import FixtureSearchProvider, SearchResult
 
 
 def _result(title="EFSA opens review of Titanium dioxide", content="The panel will assess safety data.", **overrides):
@@ -364,3 +367,173 @@ def test_news_module_does_not_import_lane_or_construct_horizon_signal():
     source = pathlib.Path("src/horizon/news.py").read_text(encoding="utf-8")
     assert not re.search(r"^\s*(from|import)\s+src\.horizon\.lane\b", source, re.MULTILINE)
     assert not re.search(r"\bHorizonSignal\(", source)  # never constructed here
+
+
+# --------------------------------------------------------------------------- #
+# find_news_signals -- FixtureSearchProvider or a counting test double, never
+# a real network call. classify_and_quote calls are monkeypatched throughout.
+# --------------------------------------------------------------------------- #
+class _CountingProvider:
+    """A SearchProvider that records every query it was asked and can be
+    told to raise for specific ones -- for testing caps and failure
+    handling precisely, which FixtureSearchProvider's simpler contract
+    does not support."""
+
+    def __init__(self, results_by_query=None, raise_for=()):
+        self.results_by_query = results_by_query or {}
+        self.raise_for = set(raise_for)
+        self.calls: list[str] = []
+
+    def search(self, query, *, include_domains=None, days=None):
+        self.calls.append(query)
+        if query in self.raise_for:
+            raise RuntimeError("provider down")
+        return list(self.results_by_query.get(query, []))
+
+
+def test_find_news_signals_returns_empty_unchanged_when_provider_is_none():
+    cache = {"171": "sentinel"}
+    signals, updated_cache = find_news_signals(["171"], None, cache, "fake-model", date(2026, 8, 4))
+    assert signals == []
+    assert updated_cache is cache
+
+
+def test_find_news_signals_happy_path(monkeypatch):
+    query = news_module._build_query("Titanium dioxide")
+    provider = FixtureSearchProvider({query: [_result(title="EFSA opens review of Titanium dioxide")]})
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("regulatory_review", "EFSA opens review")
+    )
+
+    signals, updated_cache = find_news_signals(
+        ["171"], provider, {}, "fake-model", date(2026, 8, 4), additive_names={"171": "Titanium dioxide"}
+    )
+
+    assert len(signals) == 1
+    assert signals[0].eu_canonical_id == "171"
+    assert signals[0].substance_name == "Titanium dioxide"
+    assert signals[0].search_query == query
+    assert signals[0].retrieved_at == "2026-08-04"
+    assert "171" in updated_cache  # cache was updated on the miss
+
+
+def test_find_news_signals_falls_back_to_additive_id_when_name_missing(monkeypatch):
+    query = news_module._build_query("171")
+    provider = FixtureSearchProvider({query: [_result(title="171 opens review")]})
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("regulatory_review", "171 opens review")
+    )
+
+    signals, _cache = find_news_signals(["171"], provider, {}, "fake-model", date(2026, 8, 4))
+
+    assert len(signals) == 1
+    assert signals[0].substance_name == "171"
+
+
+def test_find_news_signals_uses_cache_on_second_call_no_new_search():
+    query = news_module._build_query("Titanium dioxide")
+    provider = _CountingProvider({query: [_result()]})
+
+    _signals1, cache_after_first = find_news_signals(
+        ["171"], provider, {}, "fake-model", date(2026, 8, 4), additive_names={"171": "Titanium dioxide"}
+    )
+    assert len(provider.calls) == 1
+
+    find_news_signals(
+        ["171"], provider, cache_after_first, "fake-model", date(2026, 8, 4), additive_names={"171": "Titanium dioxide"}
+    )
+    assert len(provider.calls) == 1  # second call served entirely from cache -- no new search
+
+
+def test_find_news_signals_caps_additives_searched_per_run():
+    additive_ids = [str(n) for n in range(MAX_ADDITIVES_PER_RUN + 5)]
+    provider = _CountingProvider({})
+
+    find_news_signals(additive_ids, provider, {}, "fake-model", date(2026, 8, 4))
+
+    assert len(provider.calls) == MAX_ADDITIVES_PER_RUN
+
+
+def test_find_news_signals_caps_results_classified_per_additive(monkeypatch):
+    query = news_module._build_query("Titanium dioxide")
+    many_results = [_result(title=f"EFSA review {i} of Titanium dioxide", url=f"https://efsa.europa.eu/{i}") for i in range(10)]
+    provider = FixtureSearchProvider({query: many_results})
+
+    call_count = {"n": 0}
+
+    def _counting_call_model(prompt, model_id):
+        call_count["n"] += 1
+        return _mock_response("regulatory_review", "EFSA review")
+
+    monkeypatch.setattr(news_module, "_call_model", _counting_call_model)
+
+    signals, _cache = find_news_signals(
+        ["171"], provider, {}, "fake-model", date(2026, 8, 4), additive_names={"171": "Titanium dioxide"}
+    )
+
+    assert call_count["n"] <= MAX_RESULTS_CLASSIFIED_PER_ADDITIVE
+    assert len(signals) <= MAX_RESULTS_CLASSIFIED_PER_ADDITIVE
+
+
+def test_find_news_signals_filters_out_results_failing_the_prefilter(monkeypatch):
+    query = news_module._build_query("Titanium dioxide")
+    low_score_result = _result(title="EFSA opens review of Titanium dioxide", score=0.1)
+    provider = FixtureSearchProvider({query: [low_score_result]})
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("regulatory_review", "EFSA opens review")
+    )
+
+    signals, _cache = find_news_signals(
+        ["171"], provider, {}, "fake-model", date(2026, 8, 4), additive_names={"171": "Titanium dioxide"}
+    )
+
+    assert signals == []
+
+
+def test_find_news_signals_skips_additive_on_search_failure_but_continues_the_rest(monkeypatch):
+    query_a = news_module._build_query("A")
+    query_b = news_module._build_query("B")
+    provider = _CountingProvider(
+        results_by_query={query_b: [_result(title="B opens review")]}, raise_for={query_a}
+    )
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("regulatory_review", "B opens review")
+    )
+
+    signals, _cache = find_news_signals(
+        ["a", "b"], provider, {}, "fake-model", date(2026, 8, 4), additive_names={"a": "A", "b": "B"}
+    )
+
+    assert len(signals) == 1
+    assert signals[0].substance_name == "B"
+
+
+def test_find_news_signals_carries_stale_cache_served_flag(monkeypatch):
+    query = news_module._build_query("Titanium dioxide")
+    stale_cache = {
+        "171": {
+            "fetched_at": "2026-01-01",  # long past the 7-day TTL
+            "results": [
+                {
+                    "title": "EFSA opens review of Titanium dioxide",
+                    "url": "https://efsa.europa.eu/example",
+                    "content": "The panel will assess safety data.",
+                    "published_date": "2026-01-01",
+                    "published_date_raw": "Thu, 01 Jan 2026 00:00:00 GMT",
+                    "score": 0.9,
+                    "flags": [],
+                }
+            ],
+        }
+    }
+    provider = _CountingProvider(raise_for={query})  # provider is down -- forces a stale-serve
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("regulatory_review", "EFSA opens review")
+    )
+
+    signals, _cache = find_news_signals(
+        ["171"], provider, stale_cache, "fake-model", date(2026, 8, 4), additive_names={"171": "Titanium dioxide"}
+    )
+
+    assert len(signals) == 1
+    assert "stale_cache_served" in signals[0].flags

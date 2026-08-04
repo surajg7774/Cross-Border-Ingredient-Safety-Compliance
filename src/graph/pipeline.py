@@ -6,8 +6,8 @@
 # standalone scripts call -- this module only loads reference data ONCE and
 # wires nodes into a graph.
 """Builds the LangGraph pipeline: extract -> resolve -> [fan out: classify
-per component] -> confirm -> verdict -> [substitutes | horizon in parallel]
--> narrate -> END.
+per component] -> confirm -> verdict -> [substitutes | horizon | news in
+parallel] -> narrate -> END.
 
     from src.graph.pipeline import build_pipeline
     graph, refs = build_pipeline()
@@ -15,7 +15,7 @@ per component] -> confirm -> verdict -> [substitutes | horizon in parallel]
         {"label_path": "data/labels/Chipsmain.jpeg", "text_input": None, "name": "Chipsmain",
          "description": None, "extraction": None, "resolution": None, "category": {},
          "confirmed_categories": {}, "verdict": None, "substitutes": None, "horizon": None,
-         "narration": None, "errors": []},
+         "news_signals": None, "narration": None, "errors": []},
         {"configurable": {"thread_id": "Chipsmain"}},
     )
     # result["__interrupt__"] is present if a human confirmation is needed --
@@ -49,14 +49,22 @@ from src.graph.nodes import (
     make_extract_node,
     make_horizon_node,
     make_narrate_node,
+    make_news_node,
     make_resolve_node,
     make_substitutes_node,
     make_verdict_node,
 )
 from src.graph.state import PipelineState
 from src.horizon.load import load_horizon_meta, load_horizon_signals
+from src.horizon.search import get_search_provider
 from src.reference_data import load_eu_fip
 from src.resolve.resolver import References
+
+# Where make_news_node's disk cache lives -- under the SAME general cache
+# directory CHROMA_PERSIST_DIR sits in (settings.CACHE_DIR), not a
+# dedicated setting: this is one file, not a directory tree, and the news
+# lane has no other configuration surface (see src/horizon/news_cache.py).
+NEWS_CACHE_PATH = settings.CACHE_DIR / "horizon_news_cache.json"
 
 # Same operating config app.py's own category classifier uses (see app.py's
 # _CATEGORY_CONFIG comment) -- product queries get the user description,
@@ -159,6 +167,14 @@ def build_pipeline(
             dimensionality=DIMENSIONALITY,
         )
 
+    # get_search_provider() (src/horizon/search.py) is read ONCE, here, at
+    # graph-construction time -- not per news-node call -- matching this
+    # module's own established pattern for every other reference/setting
+    # read (RETRIEVAL_STORE above, eu_fip, the category corpus). None when
+    # TAVILY_API_KEY is unset; make_news_node degrades cleanly on None,
+    # see its own docstring.
+    search_provider = get_search_provider()
+
     graph = StateGraph(PipelineState)
     graph.add_node("extract", make_extract_node(extractor))
     graph.add_node("resolve", make_resolve_node(refs.resolver_refs))
@@ -170,6 +186,7 @@ def build_pipeline(
     graph.add_node("verdict", make_verdict_node(refs.eu_fip, refs.category_names))
     graph.add_node("substitutes", make_substitutes_node(refs.eu_fip, refs.codex_ins))
     graph.add_node("horizon", make_horizon_node(refs.horizon_signals, refs.horizon_meta))
+    graph.add_node("news", make_news_node(search_provider, NEWS_CACHE_PATH, model_id))
     graph.add_node("narrate", make_narrate_node(model_id))
 
     graph.add_edge(START, "extract")
@@ -180,14 +197,19 @@ def build_pipeline(
     graph.add_conditional_edges("resolve", make_classify_dispatch(category_config), ["classify", "confirm"])
     graph.add_edge("classify", "confirm")
     graph.add_edge("confirm", "verdict")
-    # PARALLEL: substitutes and horizon both read state["verdict"] only,
-    # neither depends on the other -- two edges from the same source node
-    # is LangGraph's own fixed (non-Send) parallel-branch idiom. Both join
-    # back into "narrate" before it runs.
+    # PARALLEL: substitutes, horizon, and news all read state["verdict"]
+    # only, none depends on either of the others -- three edges from the
+    # same source node is LangGraph's own fixed (non-Send) parallel-branch
+    # idiom, the same one substitutes/horizon already used before news
+    # joined them (see make_news_node's own docstring for what "cannot
+    # see each other's output" means here). All three join back into
+    # "narrate" before it runs.
     graph.add_edge("verdict", "substitutes")
     graph.add_edge("verdict", "horizon")
+    graph.add_edge("verdict", "news")
     graph.add_edge("substitutes", "narrate")
     graph.add_edge("horizon", "narrate")
+    graph.add_edge("news", "narrate")
     graph.add_edge("narrate", END)
 
     compiled = graph.compile(checkpointer=InMemorySaver())

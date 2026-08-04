@@ -10,6 +10,7 @@ in tests/test_category.py, and it is what actually produces the fan-out --
 mocking it would mean never really testing the Send dispatch at all.
 """
 
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -27,6 +28,7 @@ from src.graph.nodes import (
     make_extract_node,
     make_horizon_node,
     make_narrate_node,
+    make_news_node,
     make_resolve_node,
     make_substitutes_node,
     make_verdict_node,
@@ -229,10 +231,25 @@ def _mock_pure_functions(monkeypatch):
     monkeypatch.setattr(nodes_module, "evaluate", lambda *a, **k: _fake_verdict())
     monkeypatch.setattr(nodes_module, "find_substitutes", lambda *a, **k: _fake_substitutes())
     monkeypatch.setattr(nodes_module, "find_horizon_signals", lambda *a, **k: _fake_horizon())
+    # Not actually reachable with news_provider=None (make_news_node's
+    # degrade-cleanly path returns before ever calling this) -- mocked
+    # anyway so a real call is impossible even if that default changes.
+    monkeypatch.setattr(nodes_module, "find_news_signals", lambda *a, **k: ([], {}))
     monkeypatch.setattr(nodes_module, "narrate", lambda *a, **k: _fake_narration())
 
 
-def _build_test_graph(auto_confirm: bool):
+def _build_test_graph(auto_confirm: bool, news_provider=None, news_cache_path=None):
+    # news_provider defaults to None (the "no key configured" degrade
+    # path -- see make_news_node's docstring): no network, no cache file
+    # touched, {"news_signals": []} every time -- news_cache_path is never
+    # even opened on that path, so a bogus default is safe there. A test
+    # that passes a non-None news_provider MUST also pass a real
+    # news_cache_path (tmp_path-based) -- that path DOES get opened for
+    # real (news_node calls news_cache.load_cache/save_cache directly,
+    # not through the mocked find_news_signals), and a relative path
+    # would otherwise write a stray file into the repo root.
+    if news_provider is not None and news_cache_path is None:
+        raise ValueError("news_cache_path is required whenever news_provider is not None")
     config = CONFIGS["baseline"]
     graph = StateGraph(PipelineState)
     graph.add_node("extract", make_extract_node(Mock()))
@@ -242,6 +259,7 @@ def _build_test_graph(auto_confirm: bool):
     graph.add_node("verdict", make_verdict_node([], {"1.1": "Category for Component A"}))
     graph.add_node("substitutes", make_substitutes_node([], []))
     graph.add_node("horizon", make_horizon_node([], {}))
+    graph.add_node("news", make_news_node(news_provider, news_cache_path or Path("unreachable.json"), "fake-model"))
     graph.add_node("narrate", make_narrate_node("fake-model"))
 
     graph.add_edge(START, "extract")
@@ -251,8 +269,10 @@ def _build_test_graph(auto_confirm: bool):
     graph.add_edge("confirm", "verdict")
     graph.add_edge("verdict", "substitutes")
     graph.add_edge("verdict", "horizon")
+    graph.add_edge("verdict", "news")
     graph.add_edge("substitutes", "narrate")
     graph.add_edge("horizon", "narrate")
+    graph.add_edge("news", "narrate")
     graph.add_edge("narrate", END)
     return graph.compile(checkpointer=InMemorySaver())
 
@@ -270,6 +290,7 @@ def _initial_state(**overrides) -> dict:
         "verdict": None,
         "substitutes": None,
         "horizon": None,
+        "news_signals": None,
         "narration": None,
         "errors": [],
     }
@@ -362,6 +383,54 @@ def test_substitutes_and_horizon_both_run_and_both_reach_narrate(monkeypatch):
     assert result["horizon"]["warnings"] == ["horizon ran"]
     assert captured["substitutes"].warnings == ["substitutes ran"]
     assert captured["horizon"].warnings == ["horizon ran"]
+
+
+def test_news_node_degrades_cleanly_when_no_provider_configured():
+    # news_provider=None (the default -- see _build_test_graph) is
+    # make_news_node's "no key configured" path: state["news_signals"]
+    # must still end up [] (never missing, never an error), and the EFSA
+    # lane (state["horizon"]) must be completely unaffected by it.
+    graph = _build_test_graph(auto_confirm=True)
+    config = {"configurable": {"thread_id": "t-news-none"}}
+
+    result = graph.invoke(_initial_state(), config)
+
+    assert result["errors"] == []
+    assert result["news_signals"] == []
+    assert result["horizon"]["warnings"] == ["horizon ran"]  # EFSA lane unaffected
+
+
+def test_news_node_runs_alongside_substitutes_and_horizon_when_provider_configured(monkeypatch, tmp_path):
+    # A non-None provider (any object -- find_news_signals itself is
+    # mocked, so nothing here ever touches the network) takes news_node
+    # past its early-return and into a real find_news_signals call.
+    # news_node still calls the REAL news_cache.load_cache/save_cache
+    # directly (not through the mocked find_news_signals), so this needs
+    # a real tmp_path, not a relative path that would write into the repo.
+    captured = {}
+
+    def capturing_find_news_signals(additive_ids, provider, cache, model_id, today, additive_names=None):
+        captured["additive_ids"] = additive_ids
+        captured["provider"] = provider
+        return [], {"171": "cached"}
+
+    monkeypatch.setattr(nodes_module, "find_news_signals", capturing_find_news_signals)
+
+    fake_provider = object()
+    graph = _build_test_graph(
+        auto_confirm=True, news_provider=fake_provider, news_cache_path=tmp_path / "news_cache.json"
+    )
+    config = {"configurable": {"thread_id": "t-news-configured"}}
+    result = graph.invoke(_initial_state(), config)
+
+    assert result["errors"] == []
+    assert result["news_signals"] == []  # find_news_signals returned no signals, but the node still ran
+    assert captured["provider"] is fake_provider
+    assert captured["additive_ids"] == ["300"]  # _fake_verdict's one item's eu_canonical_id
+    # substitutes and horizon still ran too -- news joining the parallel
+    # branches did not crowd either of them out.
+    assert result["substitutes"]["warnings"] == ["substitutes ran"]
+    assert result["horizon"]["warnings"] == ["horizon ran"]
 
 
 def test_stage_error_lands_in_errors_without_crashing_the_graph(monkeypatch):

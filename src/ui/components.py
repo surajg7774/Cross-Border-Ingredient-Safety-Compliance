@@ -856,6 +856,68 @@ def render_substitutes(result: dict) -> None:
                 st.caption(warning)
 
 
+_NEWS_CATEGORY_LABELS = {
+    "regulatory_review": "Under regulatory review",
+    "safety_opinion": "Safety opinion",
+    "market_action": "Market or import action",
+    "consumer_alert": "Consumer alert",
+}
+
+
+def _render_news_signals(news_signals: list[dict]) -> None:
+    """Retrieved-and-classified news items, below the EFSA table in the
+    SAME "Regulatory horizon" section -- but visually its own block, not
+    folded into the table above, because it is a genuinely different KIND
+    of source (src/horizon/schemas.py's NewsSignal docstring: secondary
+    reporting, machine-retrieved and machine-classified against a
+    verbatim-quote check, never a hand-curated primary regulatory
+    document). The provenance line names that plainly, every time, not
+    just in an expander -- a reader should not have to click to learn
+    this is web search, not a person. Renders nothing when there is
+    nothing to show; this is additional coverage, never a required
+    section the way the EFSA table's "no signals" caption is."""
+    if not news_signals:
+        return
+
+    st.markdown(
+        "<p class='eu-caption'><strong>From retrieved news</strong> — automatically retrieved from "
+        "web search, not vetted by a person. Read the source before acting on any of these.</p>",
+        unsafe_allow_html=True,
+    )
+    for signal in news_signals:
+        category = signal.get("category")
+        category_label = _NEWS_CATEGORY_LABELS.get(category, category or "")
+        st.markdown(
+            f"<span class='eu-badge'>{_esc(category_label)}</span> "
+            f"<span class='eu-code'>E{_esc(signal.get('eu_canonical_id'))}</span> "
+            f"{_esc(signal.get('substance_name'))}",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<p class='eu-caption'>“{_esc(signal.get('quoted_span'))}”</p>", unsafe_allow_html=True)
+
+        source_url = signal.get("source_url")
+        source_line = (
+            f"<a href='{_esc(source_url)}' target='_blank'>Source</a>"
+            if source_url
+            else "No source URL on this record."
+        )
+        published_date = signal.get("published_date")
+        date_part = f" · {_esc(published_date)}" if published_date else ""
+        st.markdown(f"<p class='eu-caption'>{source_line}{date_part}</p>", unsafe_allow_html=True)
+
+        # A quality issue carried from src/horizon/search.py's
+        # validate_search_result or src/horizon/news_cache.py's stale-
+        # serve path is named here, not silently dropped -- same
+        # discipline the EFSA table's own "doi_unverified" badge follows.
+        flags = signal.get("flags") or []
+        if flags:
+            st.markdown(
+                f"<p class='eu-caption'><span class='eu-badge warn'>{_esc(', '.join(flags))}</span></p>",
+                unsafe_allow_html=True,
+            )
+        st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
+
+
 def render_horizon(result: dict) -> None:
     """Regulatory-horizon signals. The coverage caveat (see docs/findings.md
     F-12) is never DROPPED -- silently making a partial dataset read as
@@ -863,7 +925,9 @@ def render_horizon(result: dict) -> None:
     unconditionally: three paragraphs explaining the limits of an empty
     result is worse than the empty result. Both caveats live in "About
     these signals", one line short of always-visible; the empty-signals
-    case gets a single line that points there."""
+    case gets a single line that points there. news_signals (a DIFFERENT
+    source -- retrieved, not curated; see _render_news_signals) renders
+    below the EFSA table, never merged into it."""
     st.markdown("<div class='eu-section-title'>Regulatory horizon</div>", unsafe_allow_html=True)
 
     signals = result.get("signals") or []
@@ -911,3 +975,5 @@ def render_horizon(result: dict) -> None:
                 "been verified against efsa.europa.eu -- treat as unconfirmed.</p>",
                 unsafe_allow_html=True,
             )
+
+    _render_news_signals(result.get("news_signals") or [])

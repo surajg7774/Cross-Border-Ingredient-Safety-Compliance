@@ -20,6 +20,8 @@
 """Node functions for the LangGraph pipeline (src/graph/pipeline.py)."""
 
 from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 
 from langgraph.types import Send, interrupt
 
@@ -31,8 +33,11 @@ from src.category.experiment import ExperimentConfig
 from src.category.schemas import CategoryCandidate, CategoryQuery, CategoryResult
 from src.extract.text_parser import parse_declaration
 from src.extractors.base import LabelExtractor
+from src.horizon import news_cache
 from src.horizon.lane import find_horizon_signals
+from src.horizon.news import find_news_signals
 from src.horizon.schemas import HorizonResult
+from src.horizon.search import SearchProvider
 from src.pipeline import run_extraction
 from src.report.narrator import narrate
 from src.resolve.resolver import References, resolve_items
@@ -346,6 +351,60 @@ def make_horizon_node(horizon_signals: list[dict], horizon_meta: dict) -> Callab
             return {"errors": [f"horizon_node: {exc}"]}
 
     return horizon_node
+
+
+def make_news_node(provider: SearchProvider | None, cache_path: Path, model_id: str) -> Callable[[dict], dict]:
+    """A THIRD parallel branch alongside substitutes_node and horizon_node
+    -- reads state["verdict"] only. docs/findings.md has no numbered entry
+    for the parallel-branch constraint (checked; only docs/build_log.md's
+    "real parallel branches" section describes it), so noting it here
+    directly: substitutes_node and horizon_node run in the SAME superstep
+    and cannot see each other's output (substitutes_node's own comment,
+    "horizon_flagged=frozenset(): ... cannot see horizon's output"); this
+    node has the identical limitation with respect to BOTH of them --
+    news_node cannot see substitutes' or horizon's output either, and
+    vice versa.
+
+    Writes state["news_signals"] -- a key of its OWN, separate from
+    state["horizon"], not a second writer sharing horizon_node's key
+    (avoids needing a merge reducer for a case where only one of two
+    simultaneous writers would touch most fields, see src/graph/state.py).
+    Combining this with state["horizon"] into one HorizonResult (which now
+    carries a news_signals field alongside its existing EFSA signals --
+    src/horizon/schemas.py) happens where the graph's output is actually
+    consumed for display (app.py), not here.
+
+    Degrades cleanly when `provider` is None (src/horizon/search.py's
+    get_search_provider() found no configured key): returns
+    {"news_signals": []} immediately, no cache touched, no error -- the
+    EFSA lane (horizon_node) is entirely unaffected either way, since the
+    two branches share no state.
+    """
+
+    def news_node(state: dict) -> dict:
+        if provider is None:
+            return {"news_signals": []}
+        try:
+            verdict = ProductVerdict.model_validate(state["verdict"])
+            additive_ids = sorted({i.eu_canonical_id for i in verdict.items if i.eu_canonical_id})
+            additive_names = {
+                i.eu_canonical_id: i.additive_name for i in verdict.items if i.eu_canonical_id and i.additive_name
+            }
+            cache = news_cache.load_cache(cache_path)
+            signals, updated_cache = find_news_signals(
+                additive_ids,
+                provider,
+                cache,
+                model_id,
+                datetime.now(UTC).date(),
+                additive_names=additive_names,
+            )
+            news_cache.save_cache(cache_path, updated_cache)
+            return {"news_signals": [s.model_dump(mode="json") for s in signals]}
+        except Exception as exc:  # noqa: BLE001
+            return {"errors": [f"news_node: {exc}"]}
+
+    return news_node
 
 
 # =========================================================================== #

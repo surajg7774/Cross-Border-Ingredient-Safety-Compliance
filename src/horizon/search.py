@@ -33,17 +33,23 @@ decided against reaching for LangChain where a thin Protocol already
 gives the same independence for no real benefit (see docs/findings.md
 F-18, the same reasoning applied to src/agent/resolver_agent.py).
 
-STAGE 1 (this module, as it stands today): the Protocol, SearchResult,
-validate_search_result, and the fixture-backed provider are real and
-usable now. TavilySearchProvider's implementation exists too, but is NOT
-called anywhere in this codebase -- no config.py setting for an API key
-exists yet, no factory function selects a provider, and no test exercises
-it over the network (tests that cover it monkeypatch httpx.post; none
-make a real request). It is written now so the request/response shape is
-settled and reviewable ahead of time. It slots in behind a
-get_search_provider()-style factory (mirroring src/text_generation.py's
-get_text_generator(), which picks a backend the same way) once an API key
-actually exists -- that wiring is later-stage work, not this one.
+STAGE 2: wired. get_search_provider() (mirroring src/text_generation.py's
+get_text_generator()) returns TavilySearchProvider(settings.TAVILY_API_KEY)
+when a key is configured, or None when it is not -- NOT a fixture
+provider, NOT a silent no-op. None is a real, meaningful value every
+caller must handle explicitly: it means "search is not configured",
+distinct from "search ran and returned nothing" (an empty list). This is
+the ONLY function in this module that touches config.settings --
+TavilySearchProvider.__init__ still takes api_key as a plain constructor
+argument (same reasoning as src/report/email.py's send_report taking a
+plain SmtpConfig rather than reading settings itself: stays testable
+without an environment). src/graph/nodes.py's news_node calls
+get_search_provider() -- it never references TavilySearchProvider by
+name directly, and neither does anything else outside src/horizon/; see
+tests/test_horizon_search.py's structural test, tightened for this stage
+to check the whole src/ tree outside src/horizon/, not just this one
+file. FixtureSearchProvider remains for tests only; this factory never
+returns one.
 
 SEARCH DEPTH IS ALWAYS "basic" (1 credit), hardcoded as an explicit
 constant rather than left to whatever Tavily defaults to -- "advanced"
@@ -103,6 +109,8 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 import httpx
+
+from config import settings
 
 _TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 # 1 credit. "advanced" costs 2 credits and can take 5+ seconds per call --
@@ -250,6 +258,18 @@ class TavilySearchProvider:
                 )
             )
         return results
+
+
+def get_search_provider() -> SearchProvider | None:
+    """TavilySearchProvider(settings.TAVILY_API_KEY) when a key is
+    configured, else None. See this module's docstring -- None is a real,
+    meaningful return value, never a fixture provider and never a silent
+    stand-in for "search ran and found nothing"; the caller (src/graph/
+    nodes.py's news_node, via src/horizon/news.find_news_signals) must
+    handle it explicitly."""
+    if not settings.TAVILY_API_KEY:
+        return None
+    return TavilySearchProvider(settings.TAVILY_API_KEY)
 
 
 def _is_well_formed_url(url: str) -> bool:
