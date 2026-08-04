@@ -61,7 +61,12 @@ from src.horizon.load import load_horizon_meta, load_horizon_signals
 from src.horizon.schemas import HorizonResult
 from src.pipeline import run_extraction
 from src.reference_data import load_eu_fip
-from src.report.email import EmailAttachment, SmtpConfig, send_report, test_connection
+from src.report.email import (
+    EmailAttachment,
+    send_report,
+    smtp_config_from_settings,
+    test_connection,
+)
 from src.report.export import ReportIdentity, to_csv, to_json, to_pdf
 from src.report.narrator import Narration, narrate
 from src.resolve.resolver import References, resolve_items
@@ -1482,61 +1487,45 @@ def render_export_section(
     with col_pdf:
         st.download_button("Download PDF", pdf_bytes, file_name=f"{stem}.pdf", mime="application/pdf")
 
-    with st.expander("Email this report", expanded=False):
-        st.caption(
-            "Credentials below are used only for this send and are held in this browser session "
-            "only -- never written to disk."
-        )
+    # Server-side SMTP only (config.py's SMTP_* settings, read via
+    # smtp_config_from_settings()) -- there is no credential form here.
+    # Nobody sending a compliance report should be typing SMTP credentials
+    # into it, and this app has exactly one deployment with one operator
+    # who can set .env. When any of the five settings is absent, the whole
+    # section is skipped -- not shown disabled, not shown with an
+    # explanatory message -- so there is nothing here for the settings to
+    # go stale against. The JSON/CSV/PDF downloads above are unaffected.
+    smtp_config = smtp_config_from_settings()
+    if smtp_config is not None:
+        with st.expander("Email this report", expanded=False):
+            # A deployment check, not a user action: whoever set the five
+            # SMTP_* env vars needs a way to verify them without the first
+            # sign of a typo being a real send failing for an end user.
+            # There is no credential input left to "test" here -- this
+            # button exercises whatever .env already has.
+            if st.button("Verify SMTP configuration", key="smtp_test"):
+                try:
+                    test_connection(smtp_config)
+                    st.success("Connection succeeded.")
+                except Exception as exc:  # noqa: BLE001 -- any connection failure must surface to the user
+                    st.error(f"Connection failed: {exc}")
 
-        # SECTION H: fields default to whatever .env provides (possibly
-        # nothing), but are otherwise plain session_state -- editable here,
-        # never persisted. st.session_state.setdefault(...) BEFORE each
-        # widget, then the widget uses ONLY key= (no value=), which is the
-        # correct Streamlit pattern for a widget-owned, pre-seeded value.
-        st.session_state.setdefault("smtp_host", settings.SMTP_HOST or "")
-        st.session_state.setdefault("smtp_port", settings.SMTP_PORT or 587)
-        st.session_state.setdefault("smtp_user", settings.SMTP_USER or "")
-        st.session_state.setdefault("smtp_password", settings.SMTP_PASSWORD or "")
-        st.session_state.setdefault("smtp_from", settings.SMTP_FROM or "")
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            host = st.text_input("SMTP host", key="smtp_host")
-            user = st.text_input("Username", key="smtp_user")
-            sender = st.text_input("From address", key="smtp_from")
-        with col_b:
-            port = st.number_input("Port", key="smtp_port", min_value=1, max_value=65535, step=1)
-            password = st.text_input("Password", key="smtp_password", type="password")
-
-        smtp_config = None
-        if host.strip() and user.strip() and password and sender.strip():
-            smtp_config = SmtpConfig(
-                host=host.strip(), port=int(port), user=user.strip(), password=password, sender=sender.strip()
-            )
-
-        if st.button("Send test email", key="smtp_test", disabled=smtp_config is None):
-            try:
-                test_connection(smtp_config)
-                st.success("Connection succeeded.")
-            except Exception as exc:  # noqa: BLE001 -- any connection failure must surface to the user
-                st.error(f"Connection failed: {exc}")
-
-        recipient = st.text_input("Recipient email address", key="email_recipient")
-        st.caption("Sending transmits the PDF report above to the address entered here. Nobody else.")
-        if st.button("Send", key="send_email", disabled=smtp_config is None or not recipient.strip()):
-            try:
-                send_report(
-                    smtp_config,
-                    recipient.strip(),
-                    subject=f"EU additive compliance report -- {identity.product_name}",
-                    body=f"{narration.summary}\n\nThe full report is attached as a PDF.",
-                    attachment=EmailAttachment(
-                        filename=f"{stem}.pdf", content=pdf_bytes, mime_type="application/pdf"
-                    ),
-                )
-                st.success(f"Sent to {recipient.strip()}.")
-            except Exception as exc:  # noqa: BLE001 -- any SMTP failure must surface to the user, not crash the app
-                st.error(f"Could not send the report: {exc}")
+            recipient = st.text_input("Recipient email address", key="email_recipient")
+            st.caption("Sending transmits the PDF report above to the address entered here. Nobody else.")
+            if st.button("Send", key="send_email", disabled=not recipient.strip()):
+                try:
+                    send_report(
+                        smtp_config,
+                        recipient.strip(),
+                        subject=f"EU additive compliance report -- {identity.product_name}",
+                        body=f"{narration.summary}\n\nThe full report is attached as a PDF.",
+                        attachment=EmailAttachment(
+                            filename=f"{stem}.pdf", content=pdf_bytes, mime_type="application/pdf"
+                        ),
+                    )
+                    st.success(f"Sent to {recipient.strip()}.")
+                except Exception as exc:  # noqa: BLE001 -- any SMTP failure must surface to the user, not crash
+                    st.error(f"Could not send the report: {exc}")
 
 
 # =========================================================================== #

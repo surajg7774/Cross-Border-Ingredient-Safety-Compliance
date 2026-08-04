@@ -3,6 +3,8 @@ unlike tests/test_components.py's pure-function tests, these need a real
 Streamlit runtime, so they get their own file.
 """
 
+from pathlib import Path
+
 from streamlit.testing.v1 import AppTest
 
 _DOSAGE_ITEM = {
@@ -179,3 +181,116 @@ assert registry == {}
     at = AppTest.from_string(script).run()
     assert not at.exception
     assert at.markdown == []
+
+
+# ---- Email export: server-side SMTP only, no credential form ------------
+
+# A minimal but real ProductVerdict/SubstituteResult/HorizonResult/
+# Narration/ReportIdentity set, built the same way tests/test_export.py's
+# own fixtures are -- render_export_section (and the to_json/to_csv/to_pdf
+# calls inside it) need real pydantic instances, not dicts, since export.py
+# (unlike src/ui/components.py) DOES import the schemas.
+_EXPORT_SECTION_SCRIPT = """
+import app
+from src.horizon.schemas import HorizonResult
+from src.report.export import ReportIdentity
+from src.report.narrator import Narration
+from src.rules.schemas import CategoryVerdict, ItemVerdict, ProductVerdict
+from src.substitutes.schemas import SubstituteResult
+
+app.smtp_config_from_settings = lambda: __SMTP_CONFIG__
+
+verdict = ProductVerdict(
+    items=[
+        ItemVerdict(
+            item_id=1,
+            eu_canonical_id="551",
+            additive_name="Silicon dioxide",
+            component_label=None,
+            by_category=[
+                CategoryVerdict(
+                    fcs_code="12.2.2",
+                    category_name="Seasonings",
+                    rank=1,
+                    verdict="permitted_qs",
+                    max_level_mg_kg=None,
+                    max_level_basis="gmp",
+                    conditions=None,
+                    note_codes=[],
+                    source_url=None,
+                    retrieved_date=None,
+                )
+            ],
+            headline="permitted_qs",
+            category_sensitive=False,
+            verdict_certainty="certain",
+            flags=[],
+        )
+    ],
+    blocking=[],
+    category_conflict=[],
+    review_required=[],
+    category_sensitive_items=[],
+    summary="1 item(s) evaluated.",
+    category_used={},
+    category_source={},
+    warnings=[],
+    data_version="test",
+)
+substitutes = SubstituteResult(suggestions=[], warnings=[])
+horizon = HorizonResult(signals=[], checked_ids=[], warnings=[], data_version="test", data_retrieved="2026-08-01")
+narration = Narration(summary="Not blocked.", detail={}, model_id="fake-model", unfaithful_claims=[])
+identity = ReportIdentity(product_name="Test product", source="test.jpg", category="cat", timestamp="now")
+
+app.render_export_section(verdict, substitutes, horizon, narration, identity)
+"""
+
+
+def test_email_section_absent_when_smtp_not_configured():
+    # smtp_config_from_settings() -> None (the .env-absent case) must mean
+    # the WHOLE "Email this report" expander is skipped -- not shown
+    # disabled, not shown with an explanatory message -- while the
+    # downloads above it still render.
+    script = _EXPORT_SECTION_SCRIPT.replace("__SMTP_CONFIG__", "None")
+    at = AppTest.from_string(script).run()
+    assert not at.exception
+    assert at.expander == []
+    assert len(at.download_button) == 3
+
+
+def test_email_section_present_when_smtp_configured():
+    # The inverse: with all five settings present, the section renders --
+    # proves the guard above isn't simply hiding the section unconditionally.
+    script = _EXPORT_SECTION_SCRIPT.replace(
+        "app.smtp_config_from_settings = lambda: __SMTP_CONFIG__",
+        "from src.report.email import SmtpConfig\n"
+        "app.smtp_config_from_settings = lambda: SmtpConfig("
+        "host='smtp.example.com', port=587, user='u', password='p', sender='reports@example.com')",
+    )
+    at = AppTest.from_string(script).run()
+    assert not at.exception
+    assert len(at.expander) == 1
+    assert at.expander[0].label == "Email this report"
+
+
+def test_no_smtp_credential_fields_remain_in_app_source():
+    # TASK: no credential fields in the UI at all -- the exact widget calls
+    # the old form used, and the session_state keys they were bound to,
+    # must be gone from app.py entirely, not merely unreachable.
+    source = Path("app.py").read_text(encoding="utf-8")
+    removed_snippets = (
+        'st.text_input("SMTP host"',
+        'st.text_input("Username"',
+        'st.text_input("From address"',
+        'st.number_input("Port"',
+        'st.text_input("Password"',
+        "smtp_host",
+        "smtp_port",
+        "smtp_user",
+        "smtp_password",
+        "smtp_from",
+        "SmtpConfig(",
+        "held in this browser session",
+    )
+    for snippet in removed_snippets:
+        assert snippet not in source, f"{snippet!r} should no longer appear in app.py"
