@@ -1177,36 +1177,69 @@ def _proposal_signature(proposal: AgentProposal) -> tuple:
     )
 
 
+# proposed_classification -> plain English, no requirement that the reader
+# know what "food_ingredient"/"flavouring"/"enzyme" mean as REGULATORY
+# terms -- each names the everyday thing it is AND, for the two that are
+# food additives under a different regulation rather than not additives at
+# all, says so ("covered by different rules") instead of leaving a reader
+# to guess why something food-additive-shaped was not assessed here.
+# "additive" gets its INS code appended by _proposal_headline below, not
+# here, since that part is conditional on proposed_canonical_ins existing.
+_CLASSIFICATION_PHRASES: dict[str, str] = {
+    "additive": "This looks like a food additive",
+    "food_ingredient": "This looks like an ordinary food ingredient, not an additive.",
+    "flavouring": "This looks like a flavouring, covered by different rules.",
+    "enzyme": "This looks like an enzyme, covered by different rules.",
+    "unknown": "We could not classify this with confidence.",
+}
+# confidence -> plain English -- "confidence: high" as a raw label/value
+# pair reads as a debug field; a sentence says the same thing without
+# requiring the reader to already know what to do with a bare "high".
+_CONFIDENCE_PHRASES: dict[str, str] = {
+    "high": "We're confident about this.",
+    "medium": "We're reasonably confident, but you may want to double-check.",
+    "low": "We're not very confident about this — please verify.",
+}
+
+
+def _proposal_headline(proposal: AgentProposal) -> str:
+    """"This looks like a food additive (INS 340). We're confident about
+    this." -- never the raw proposed_classification/confidence strings
+    (see _CLASSIFICATION_PHRASES/_CONFIDENCE_PHRASES above)."""
+    phrase = _CLASSIFICATION_PHRASES.get(proposal.proposed_classification, _CLASSIFICATION_PHRASES["unknown"])
+    if proposal.proposed_classification == "additive":
+        code = f" (INS {proposal.proposed_canonical_ins})" if proposal.proposed_canonical_ins else ""
+        phrase = f"{phrase}{code}."
+    confidence = _CONFIDENCE_PHRASES.get(proposal.confidence, "")
+    return f"{phrase} {confidence}".strip()
+
+
 def _render_agent_proposal(item_ids: list[int], proposal: AgentProposal) -> None:
     """Renders ONE proposal shared by every item in `item_ids` (usually
     one, but see _group_review_items -- several near-identical review-queue
     items, e.g. two "MODIFIED CORNSTARCH" entries, share a single render
     and a single Accept/Reject that applies to all of them at once).
 
-    The short reason is shown directly (decline_reason, or the proposed
-    identity line); the LONGER reasoning paragraph -- which restates the
-    same thing at more length -- and the evidence it is based on live
-    behind one "Why" expander instead of printing both unconditionally."""
+    Declining is the correct outcome, not a failure -- see
+    src/agent/resolver_agent.py's own module docstring ("DECLINING IS A
+    SUCCESS") -- so it is framed as work for the reader to finish, not as
+    something the assistant got wrong. decline_reason is kept as
+    supporting detail, not the headline. The reasoning paragraph lives
+    behind a "Why" expander; tool_calls and evidence are internal
+    machinery (tool names like list_family_members, get_product_context)
+    that repeats what reasoning already says in plain English -- dropped
+    from this screen entirely, kept in full in the JSON export's
+    agent_review section (see render_export_section)."""
     if proposal.declined:
-        st.info(f"Assistant declined: {proposal.decline_reason}")
+        st.info("Needs your decision — this couldn't be narrowed down.")
+        if proposal.decline_reason:
+            st.caption(proposal.decline_reason)
     else:
-        code = f" (INS {proposal.proposed_canonical_ins})" if proposal.proposed_canonical_ins else ""
-        st.markdown(f"**Assistant proposes:** {proposal.proposed_classification}{code} — confidence: {proposal.confidence}")
+        st.markdown(_proposal_headline(proposal))
 
-    evidence = [line for line in proposal.evidence if line and line.strip()]
-    if proposal.reasoning or evidence:
+    if proposal.reasoning:
         with st.expander("Why"):
-            if proposal.reasoning:
-                st.write(proposal.reasoning)
-            if evidence:
-                st.caption(f"Evidence ({len(evidence)})")
-                for line in evidence:
-                    st.markdown(f"- {line}")
-
-    if proposal.tool_calls:
-        with st.expander(f"Tool calls ({len(proposal.tool_calls)})"):
-            for call in proposal.tool_calls:
-                st.caption(f"**{call.get('tool')}**({json.dumps(call.get('args', {}))}) → {call.get('result_summary')}")
+            st.write(proposal.reasoning)
 
     key_id = item_ids[0]
     if not proposal.declined:
@@ -1251,7 +1284,9 @@ def _group_review_items(items: list[dict], names: dict[int, str] | None) -> list
     return groups
 
 
-def _render_review_group(group: list[dict], names: dict[int, str] | None) -> None:
+def _render_review_group(
+    group: list[dict], names: dict[int, str] | None, ins_names: dict[str, str] | None = None
+) -> None:
     item_ids = [item["item_id"] for item in group]
     primary = group[0]
     primary_id = primary["item_id"]
@@ -1262,7 +1297,7 @@ def _render_review_group(group: list[dict], names: dict[int, str] | None) -> Non
     if len(group) > 1:
         st.caption(f"This name appears {len(group)} times on this label.")
     if candidates:
-        st.caption("Possible matches: " + ", ".join(candidates))
+        st.caption("Possible matches: " + components.candidates_phrase(candidates, ins_names))
     else:
         st.caption("No candidate match found -- needs manual identification.")
 
@@ -1290,14 +1325,18 @@ def _render_review_group(group: list[dict], names: dict[int, str] | None) -> Non
     st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
 
 
-def render_agent_review_queue(items: list[dict], names: dict[int, str] | None = None) -> None:
+def render_agent_review_queue(
+    items: list[dict], names: dict[int, str] | None = None, ins_names: dict[str, str] | None = None
+) -> None:
     """The "unresolved" slice of the review queue (identity resolution) --
     "category_unknown" items still go through components.render_review_queue
     unchanged, since those need a food-category confirmation, not an
     identity proposal. Same section title/note styling as the plain queue,
     with an "Ask the assistant" control (per item, and for the whole queue)
     added below each entry. Items that turn out to share a name AND a
-    proposal render once, via _group_review_items."""
+    proposal render once, via _group_review_items. `ins_names` (INS code ->
+    real name) is threaded through to _render_review_group so an ambiguous
+    item's "candidate:" flags never show as bare codes."""
     if not items:
         return
     st.session_state.setdefault("agent_proposals", {})
@@ -1319,7 +1358,7 @@ def render_agent_review_queue(items: list[dict], names: dict[int, str] | None = 
         st.rerun()
 
     for group in _group_review_items(items, names):
-        _render_review_group(group, names)
+        _render_review_group(group, names, ins_names)
 
 
 def render_results() -> None:
@@ -1329,6 +1368,12 @@ def render_results() -> None:
     horizon_result: HorizonResult = st.session_state.horizon_result
     narration: Narration = st.session_state.narration
     names = _extraction_names(st.session_state.extraction)
+    # INS code -> real name, for review-queue "candidate:" flags -- a bare
+    # code ("960a") means nothing to a reader with no regulatory training
+    # (see components.candidates_phrase). Built once here, not per-item.
+    ins_names = {
+        r["ins"]: r["name"] for r in _load_references().codex_ins if r.get("ins") and r.get("name")
+    }
     identity = _build_identity(verdict)
 
     st.markdown(f"## {html.escape(identity.product_name)}")
@@ -1429,31 +1474,49 @@ def render_results() -> None:
     components.render_verdict_caveats(item_dicts)
 
     # Any Group clause (Group I, Group II, ...) shared by more than one
-    # item's primary candidate renders ONCE here, before any section, and
-    # every item that carries it -- Blocking, Category-dependent, or
-    # Permitted alike -- links back to it instead of repeating it (see
-    # components.render_group_conditions_block for the measurement and the
-    # merged-clause case it deliberately leaves untouched).
-    group_registry = components.render_group_conditions_block(
-        blocking_items + conflict_items + permitted_items
-    )
+    # item's primary candidate renders ONCE here, before the table, and
+    # every item that carries it -- whatever its Status -- links back to
+    # it instead of repeating it (see components.render_group_conditions_
+    # block for the measurement and the merged-clause case it deliberately
+    # leaves untouched).
+    all_items = blocking_items + conflict_items + permitted_items
+    group_registry = components.render_group_conditions_block(all_items)
 
-    components.render_verdict_section(
-        "Blocking", blocking_items, names, is_blocking=True, group_registry=group_registry
-    )
-    components.render_verdict_section(
-        "Category-dependent", conflict_items, names, group_registry=group_registry
-    )
-    components.render_permitted_section("Permitted", permitted_items, names, group_registry=group_registry)
+    # ONE table, one row per additive, worst-first -- replaces the old
+    # Blocking/Category-dependent/Permitted sections (see
+    # components.render_additives_table's own docstring for why those
+    # three headline-derived buckets collapse to a single Status column
+    # instead of three separately-labelled sections).
+    components.render_additives_table(all_items, names, group_registry=group_registry)
 
     components.render_substitutes(substitute_result.model_dump())
     components.render_horizon(horizon_result.model_dump())
 
-    render_agent_review_queue(identity_review_items, names)
-    components.render_review_queue(category_review_items, names)
+    render_agent_review_queue(identity_review_items, names, ins_names)
+    components.render_review_queue(category_review_items, names, ins_names)
     components.render_out_of_scope(out_of_scope_items, names)
 
-    render_export_section(verdict, substitute_result, horizon_result, narration, identity)
+    render_export_section(
+        verdict, substitute_result, horizon_result, narration, identity, _agent_review_export()
+    )
+
+
+def _agent_review_export() -> dict | None:
+    """item_id -> {"decision": ..., **AgentProposal fields}, for every
+    review-queue item a human asked the assistant about this run --
+    Task 1 removed the tool-calls/evidence trail from the results screen
+    (see _render_agent_proposal), so this is the ONLY place that data
+    still reaches the reader; see to_json's own docstring for why it is
+    JSON-only. None (not {}) when nothing was ever asked, so to_json can
+    omit the key entirely rather than writing an empty section."""
+    proposals = st.session_state.get("agent_proposals") or {}
+    if not proposals:
+        return None
+    decisions = st.session_state.get("agent_decisions") or {}
+    return {
+        item_id: {"decision": decisions.get(item_id), **(proposal.model_dump() if proposal else {})}
+        for item_id, proposal in proposals.items()
+    }
 
 
 def render_export_section(
@@ -1462,15 +1525,18 @@ def render_export_section(
     horizon: HorizonResult,
     narration: Narration,
     identity: ReportIdentity,
+    agent_review: dict | None = None,
 ) -> None:
     """Three download buttons (JSON/CSV/PDF) and an opt-in email section.
     Every export carries the same caveats the screen above does -- see
-    src/report/export.py's module docstring."""
+    src/report/export.py's module docstring. `agent_review` reaches ONLY
+    to_json -- see that function's own docstring for why CSV/PDF, both
+    human-facing summary documents, deliberately do not receive it."""
     st.markdown("<div class='eu-section-title'>Export and share</div>", unsafe_allow_html=True)
 
     stem = "".join(c if c.isalnum() else "_" for c in identity.product_name).strip("_") or "report"
 
-    json_text = to_json(verdict, substitutes, horizon, narration)
+    json_text = to_json(verdict, substitutes, horizon, narration, agent_review=agent_review)
     csv_text = to_csv(verdict, identity)
     pdf_bytes = to_pdf(verdict, substitutes, horizon, narration, identity)
 

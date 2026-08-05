@@ -6,6 +6,7 @@ src/ui/components.py.
 """
 
 import app
+from src.agent.resolver_agent import AgentProposal
 from src.category.corpus import FoodCategory
 from src.category.schemas import CategoryCandidate
 
@@ -72,3 +73,48 @@ def test_candidate_option_label_never_shows_a_similarity_score():
     label = app._candidate_option_label(candidate, categories)
     assert "score" not in label.lower()
     assert "0.63" not in label
+
+
+def _proposal(classification, confidence, ins=None, **overrides):
+    base = {
+        "item_id": 1,
+        "name_as_declared": "test",
+        "proposed_canonical_ins": ins,
+        "proposed_classification": classification,
+        "confidence": confidence,
+        "reasoning": "",
+        "evidence": [],
+        "tool_calls": [],
+        "declined": False,
+        "decline_reason": None,
+    }
+    base.update(overrides)
+    return AgentProposal(**base)
+
+
+def test_proposal_headline_additive_includes_ins_code_and_confidence():
+    # MEASURED BUG this replaces: "Assistant proposes: additive (INS 340)
+    # — confidence: high" showed the raw classification/confidence enum
+    # values -- no internal vocabulary should reach this screen.
+    headline = app._proposal_headline(_proposal("additive", "high", ins="340"))
+    assert headline == "This looks like a food additive (INS 340). We're confident about this."
+    assert "additive" not in headline.lower().replace("food additive", "")  # no bare enum leaks through
+
+
+def test_proposal_headline_additive_without_ins_omits_the_code():
+    headline = app._proposal_headline(_proposal("additive", "low"))
+    assert headline == "This looks like a food additive. We're not very confident about this — please verify."
+
+
+def test_proposal_headline_food_ingredient_says_not_an_additive():
+    headline = app._proposal_headline(_proposal("food_ingredient", "medium"))
+    assert headline == (
+        "This looks like an ordinary food ingredient, not an additive. We're reasonably confident, "
+        "but you may want to double-check."
+    )
+    assert "food_ingredient" not in headline
+
+
+def test_proposal_headline_flavouring_and_enzyme_say_covered_by_different_rules():
+    assert "covered by different rules" in app._proposal_headline(_proposal("flavouring", "high"))
+    assert "covered by different rules" in app._proposal_headline(_proposal("enzyme", "high"))

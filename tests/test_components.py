@@ -2,26 +2,29 @@
 runtime required for these, since they are plain string/dict functions."""
 
 from src.ui.components import (
+    _additive_row,
     _blocking_reason,
     _conditions_notes,
+    _detail_lead_line,
     _display_name,
+    _diverging_candidates,
     _group_conditions_map,
     _group_note,
     _is_ancestor_code,
+    _max_amount_cell,
     _normalize_conditions,
     _order_news_signals,
     _out_of_scope_reason,
     _period_of_application_note,
-    _permitted_group_key,
     _primary_candidate,
     _pure_group_match,
     _short_category_name,
     _split_merged_clauses,
+    _status_label,
     _substitute_flag_label,
     _verdict_caveats,
-    _verdict_label,
+    candidates_phrase,
     count_buckets,
-    verdict_strip_html,
 )
 
 
@@ -42,45 +45,33 @@ def _candidate(fcs_code, verdict, **overrides):
     return base
 
 
-def test_single_candidate_renders_one_block_no_divergence():
+def test_diverging_candidates_empty_for_a_single_candidate():
     item = {
-        "eu_canonical_id": "300",
-        "component_label": None,
-        "flags": ["category_confirmed_by_user"],
         "confirmed_fcs_code": "1.5",
         "by_category": [_candidate("1.5", "permitted_qs")],
     }
-    html_out = verdict_strip_html(item, "Ascorbic acid")
-    assert html_out.count("eu-block'") == 1
-    assert "eu-divergence" not in html_out
-    assert "confirmed" in html_out  # the confirmed tag
+    assert _diverging_candidates(item) == []
 
 
-def test_agreeing_candidates_collapse_to_one_block():
-    """Where all candidates agree, render one block and omit the
-    divergence line -- even when there is more than one candidate."""
+def test_diverging_candidates_empty_when_all_candidates_agree():
+    """Where all candidates agree, there is nothing to explain -- even
+    when there is more than one candidate."""
     item = {
-        "eu_canonical_id": "300",
-        "component_label": None,
-        "flags": [],
         "confirmed_fcs_code": None,
         "by_category": [
             _candidate("1.5", "permitted_qs"),
             _candidate("7.2", "permitted_qs"),
         ],
     }
-    html_out = verdict_strip_html(item, "Ascorbic acid")
-    assert html_out.count("eu-block'") == 1
-    assert "eu-divergence" not in html_out
+    assert _diverging_candidates(item) == []
 
 
-def test_divergent_candidates_show_all_blocks_confirmed_and_dimmed():
+def test_diverging_candidates_returns_all_when_they_genuinely_disagree():
     """MEASURED PROBLEM this covers: E551 permitted under the confirmed
-    12.2.2, not permitted under 15.1 -- the user must see both."""
+    12.2.2, not permitted under 15.1 (here modelled as 12.1.1 vs 12.1,
+    which are NOT ancestor-related to each other or to 12.2.2) -- the
+    reader must see all three, confirmed one first."""
     item = {
-        "eu_canonical_id": "551",
-        "component_label": None,
-        "flags": ["category_confirmed_by_user"],
         "confirmed_fcs_code": "12.2.2",
         "by_category": [
             _candidate("12.2.2", "permitted_with_conditions"),
@@ -88,50 +79,33 @@ def test_divergent_candidates_show_all_blocks_confirmed_and_dimmed():
             _candidate("12.1", "not_permitted_in_category"),
         ],
     }
-    html_out = verdict_strip_html(item, "Silicon dioxide")
-
-    assert html_out.count("eu-block'") == 3
-    assert "eu-divergence" in html_out
-    assert "verdict depends on category" in html_out
-    # The confirmed block: outlined/full-colour, tagged, never dimmed.
-    assert "data-bucket='permitted' data-confirmed='true'>" in html_out
-    assert "<span class='eu-code'>12.2.2</span>" in html_out
-    # The other two: dimmed, not tagged confirmed.
-    assert html_out.count("data-dimmed='true'") == 2
-    assert html_out.count("eu-block-confirmed-tag") == 1
+    diverging = _diverging_candidates(item)
+    assert [cv["fcs_code"] for cv in diverging] == ["12.2.2", "12.1.1", "12.1"]
 
 
-def test_unconfirmed_multi_candidate_strip_has_no_dimming():
-    """No confirmed_fcs_code at all (e.g. a preview-only render) -- nothing
-    is "the" answer yet, so nothing should be dimmed relative to it."""
+def test_diverging_candidates_unconfirmed_still_returns_the_real_divergence():
+    """No confirmed_fcs_code at all (e.g. a preview-only render) -- still
+    a genuine divergence, just with nothing marked "confirmed"."""
     item = {
-        "eu_canonical_id": "551",
-        "component_label": None,
-        "flags": ["category_unconfirmed"],
         "confirmed_fcs_code": None,
         "by_category": [
             _candidate("12.2.2", "permitted_with_conditions"),
             _candidate("12.1", "not_permitted_in_category"),
         ],
     }
-    html_out = verdict_strip_html(item, "Silicon dioxide")
-    assert "data-dimmed" not in html_out
-    assert "eu-block-confirmed-tag" not in html_out
+    diverging = _diverging_candidates(item)
+    assert len(diverging) == 2
 
 
-def test_duplicate_fcs_codes_are_deduped():
+def test_diverging_candidates_deduped_fcs_codes_collapse_to_no_divergence():
     item = {
-        "eu_canonical_id": "551",
-        "component_label": None,
-        "flags": ["category_confirmed_by_user"],
         "confirmed_fcs_code": "12.2.2",
         "by_category": [
             _candidate("12.2.2", "permitted_qs"),
             _candidate("12.2.2", "permitted_qs"),  # same code from the confirmed-candidate merge
         ],
     }
-    html_out = verdict_strip_html(item, "Silicon dioxide")
-    assert html_out.count("eu-block'") == 1
+    assert _diverging_candidates(item) == []
 
 
 def test_primary_candidate_prefers_confirmed_code():
@@ -177,10 +151,52 @@ def test_blocking_reason_distinguishes_prohibited_from_absent():
 
 
 def test_out_of_scope_reason_maps_governing_regulation():
-    assert "flavouring" in _out_of_scope_reason({"flags": ["governing_regulation: Reg 1334/2008"]})
-    assert "enzyme" in _out_of_scope_reason({"flags": ["governing_regulation: Reg 1332/2008"]})
-    assert "food ingredient" in _out_of_scope_reason({"flags": ["governing_regulation: not an additive"]})
-    assert _out_of_scope_reason({"flags": []}) == "not an additive"
+    # Regulation numbers are dropped from this default, reader-facing text
+    # -- the real citation stays on the item's own flag, in the export.
+    assert _out_of_scope_reason({"flags": ["governing_regulation: Reg 1334/2008"]}) == (
+        "a flavouring, covered by different rules"
+    )
+    assert _out_of_scope_reason({"flags": ["governing_regulation: Reg 1332/2008"]}) == (
+        "an enzyme, covered by different rules"
+    )
+    assert _out_of_scope_reason({"flags": ["governing_regulation: not an additive"]}) == "an ordinary food"
+    assert _out_of_scope_reason({"flags": []}) == "an ordinary food"
+    assert "Reg " not in _out_of_scope_reason({"flags": ["governing_regulation: Reg 1334/2008"]})
+
+
+def test_candidates_phrase_shows_real_names_for_a_few_candidates():
+    # MEASURED (data/reference/label_aliases.json): "stevia" resolves to
+    # exactly these 4 bare INS codes -- a reader with no regulatory
+    # training cannot act on "960a, 960b, 960c, 960d" alone.
+    codes = ["960a", "960b", "960c", "960d"]
+    ins_names = {
+        "960a": "Steviol glycosides from Stevia rebaudiana Bertoni",
+        "960b": "Steviol glycosides from fermentation",
+        "960c": "Enzymatically produced steviol glycosides",
+        "960d": "Glucosylated steviol glycosides",
+    }
+    phrase = candidates_phrase(codes, ins_names)
+    assert phrase == (
+        "Steviol glycosides from Stevia rebaudiana Bertoni, Steviol glycosides from fermentation, "
+        "Enzymatically produced steviol glycosides, Glucosylated steviol glycosides"
+    )
+
+
+def test_candidates_phrase_falls_back_to_e_number_for_an_unnamed_code():
+    assert candidates_phrase(["960a"], {}) == "E960a"
+    assert candidates_phrase(["960a"], None) == "E960a"
+
+
+def test_candidates_phrase_shows_count_and_range_for_many_candidates():
+    # MEASURED: "modified starch"/"modified cornstarch" both resolve to
+    # 17 candidates spanning E1400-E1452 -- 17 long INS names is not
+    # something anyone scans; a count and the range is.
+    codes = ["1400", "1401", "1402", "1403", "1404", "1405", "1410"]
+    assert candidates_phrase(codes, {}) == "7 possible matches (E1400–E1410)"
+
+
+def test_candidates_phrase_empty_for_no_candidates():
+    assert candidates_phrase([], {}) == ""
 
 
 def test_substitute_flag_label_translates_known_flags_and_passes_through_unknown():
@@ -199,16 +215,13 @@ def test_is_ancestor_code():
     assert _is_ancestor_code("1", "14.1.4") is False  # prefix string, not a real dotted ancestor
 
 
-def test_khusmain_real_shape_ancestor_candidates_render_as_parent_not_divergence():
+def test_khusmain_real_shape_ancestor_candidates_produce_no_divergence():
     # THE REAL CASE: Khusmain's three retrieved candidates were 14.1.4,
     # 14.1 and 14 -- not alternatives, 14.1.4 is INSIDE 14.1 is INSIDE 14.
-    # eu_fip has no row for the parents, so they would otherwise render
-    # "not permitted in this category": true, meaningless, and it falsely
-    # claims a divergence that does not exist.
+    # eu_fip has no row for the parents, so they would otherwise evaluate
+    # "not permitted in this category": true, meaningless, and it would
+    # falsely claim a divergence that does not exist.
     item = {
-        "eu_canonical_id": "330",
-        "component_label": None,
-        "flags": ["category_confirmed_by_user"],
         "confirmed_fcs_code": "14.1.4",
         "by_category": [
             _candidate("14.1.4", "permitted_with_conditions", category_name="Flavoured drinks"),
@@ -216,31 +229,9 @@ def test_khusmain_real_shape_ancestor_candidates_render_as_parent_not_divergence
             _candidate("14", "not_permitted_in_category", category_name="Beverages"),
         ],
     }
-    html_out = verdict_strip_html(item, "Citric acid")
-
-    # One real block (the confirmed one) -- no competing verdict.
-    assert "verdict depends on category" not in html_out
-    assert "eu-divergence" not in html_out
-    assert "not permitted in this category" not in html_out
-    # The parents are still present, just relabelled and unstyled.
-    assert html_out.count("parent category") == 2
-    assert "<span class='eu-code'>14.1</span>" in html_out
-    assert "<span class='eu-code'>14</span>" in html_out
-    assert "Flavoured drinks" in html_out  # the confirmed block's category name
-    assert "confirmed" in html_out
-
-
-def test_confirmed_block_shows_category_name_alongside_code():
-    item = {
-        "eu_canonical_id": "551",
-        "component_label": None,
-        "flags": ["category_confirmed_by_user"],
-        "confirmed_fcs_code": "12.2.2",
-        "by_category": [_candidate("12.2.2", "permitted_qs", category_name="Seasonings and condiments")],
-    }
-    html_out = verdict_strip_html(item, "Silicon dioxide")
-    assert "eu-block-category" in html_out
-    assert "Seasonings and condiments" in html_out
+    # The parents are filtered out entirely -- one real candidate left,
+    # nothing to diverge against.
+    assert _diverging_candidates(item) == []
 
 
 def test_genuine_divergence_between_non_ancestor_candidates_still_shown():
@@ -248,19 +239,14 @@ def test_genuine_divergence_between_non_ancestor_candidates_still_shown():
     # divergence between two candidates that are not in the same branch
     # (Chipsmain's E551: permitted under 12.2.2, not under 15.1).
     item = {
-        "eu_canonical_id": "551",
-        "component_label": None,
-        "flags": ["category_confirmed_by_user"],
         "confirmed_fcs_code": "12.2.2",
         "by_category": [
             _candidate("12.2.2", "permitted_with_conditions", category_name="Seasonings"),
             _candidate("15.1", "not_permitted_in_category", category_name="Savoury snacks"),
         ],
     }
-    html_out = verdict_strip_html(item, "Silicon dioxide")
-    assert "verdict depends on category" in html_out
-    assert html_out.count("eu-block'") == 2
-    assert "parent category" not in html_out
+    diverging = _diverging_candidates(item)
+    assert [cv["fcs_code"] for cv in diverging] == ["12.2.2", "15.1"]
 
 
 def test_group_note_derives_group_name_from_conditions_text():
@@ -415,50 +401,161 @@ def test_short_category_name_none_passthrough():
     assert _short_category_name(None) is None
 
 
-def test_verdict_label_plain_english_wording():
-    assert _verdict_label("permitted_with_conditions") == ("Allowed — conditions to check", "permitted")
-    assert _verdict_label("not_permitted_in_category") == ("Not allowed in this kind of food", "blocked")
-    assert _verdict_label("not_authorised_eu") == ("Not authorised in the EU", "blocked")
-    assert _verdict_label("permitted_qs") == ("Allowed — no fixed limit", "permitted")
+# ---- UI REDESIGN (ui-simplify): _status_label/_max_amount_cell/
+# _additive_row/_detail_lead_line -- the additives table's Status/Maximum
+# amount columns and per-row expander lead line. Four plain-English status
+# strings only, never a raw verdict string. ------------------------------
+def test_status_label_the_two_blocking_verdicts():
+    assert _status_label("not_permitted_in_category", None) == ("Not allowed in this food", "blocked")
+    assert _status_label("not_authorised_eu", None) == ("Not allowed in the EU", "blocked")
 
 
-def test_verdict_label_with_limit_includes_the_actual_level():
-    label, bucket = _verdict_label("permitted_with_limit", 5000.0)
-    assert label == "Allowed — up to 5000 mg/kg"
-    assert bucket == "permitted"
+def test_status_label_permitted_qs_reads_allowed_with_no_limit():
+    assert _status_label("permitted_qs", None) == ("Allowed", "permitted")
 
 
-def test_verdict_label_with_limit_missing_level_falls_back():
-    label, _bucket = _verdict_label("permitted_with_limit", None)
-    assert label == "Allowed — no fixed limit"
+def test_status_label_driven_by_max_level_not_the_verdict_string():
+    # MEASURED: permitted_with_conditions can ALSO carry a real mg/kg cap
+    # (96% of eu_fip rows carry conditions text; src/rules/engine.py's own
+    # dosage caveat already fires off max_level_mg_kg directly for exactly
+    # this reason) -- status must reflect that, not treat every
+    # permitted_with_conditions row as bare "Allowed".
+    assert _status_label("permitted_with_conditions", 500.0) == ("Allowed with limits", "permitted")
+    assert _status_label("permitted_with_conditions", None) == ("Allowed", "permitted")
+    assert _status_label("permitted_with_limit", 5000.0) == ("Allowed with limits", "permitted")
 
 
-def test_permitted_group_key_same_for_items_sharing_the_whole_block():
-    item_a = {
-        "component_label": "SEASONING",
-        "by_category": [_candidate("5.1", "permitted_with_conditions", conditions="Group I text", category_name="Cocoa")],
-        "confirmed_fcs_code": "5.1",
+def test_max_amount_cell_real_figure_or_no_fixed_limit_never_quantum_satis():
+    assert _max_amount_cell("permitted_qs", None) == "No fixed limit"
+    assert _max_amount_cell("permitted_with_limit", 5000.0) == "Up to 5000 mg/kg"
+    assert _max_amount_cell("permitted_with_conditions", 500.0) == "Up to 500 mg/kg"
+    assert "quantum satis" not in _max_amount_cell("permitted_qs", None)
+
+
+def test_max_amount_cell_dash_for_a_blocking_verdict():
+    assert _max_amount_cell("not_permitted_in_category", None) == "—"
+    assert _max_amount_cell("not_authorised_eu", None) == "—"
+
+
+def test_additive_row_permitted_qs():
+    item = {
+        "eu_canonical_id": "300",
+        "additive_name": "Ascorbic acid",
+        "component_label": None,
+        "confirmed_fcs_code": "1.5",
+        "flags": [],
+        "by_category": [_candidate("1.5", "permitted_qs", category_name="Dehydrated milk")],
     }
-    item_b = {
-        "component_label": "SEASONING",
-        "by_category": [_candidate("5.1", "permitted_with_conditions", conditions="Group I text", category_name="Cocoa")],
-        "confirmed_fcs_code": "5.1",
-    }
-    assert _permitted_group_key(item_a) == _permitted_group_key(item_b)
+    row = _additive_row(item, None)
+    assert row["additive"] == "Ascorbic acid (E300)"
+    assert row["status"] == "Allowed"
+    assert row["bucket"] == "permitted"
+    assert row["max_amount"] == "No fixed limit"
+    assert row["where"] == "Dehydrated milk (1.5)"
 
 
-def test_permitted_group_key_differs_when_conditions_differ():
-    item_a = {
+def test_additive_row_where_includes_component_label():
+    item = {
+        "eu_canonical_id": "551",
+        "additive_name": "Silicon dioxide",
         "component_label": "SEASONING",
-        "by_category": [_candidate("5.1", "permitted_with_limit", conditions=None, max_level_mg_kg=5000.0, category_name="Cocoa")],
-        "confirmed_fcs_code": "5.1",
+        "confirmed_fcs_code": "12.2.2",
+        "flags": [],
+        "by_category": [_candidate("12.2.2", "permitted_qs", category_name="Seasonings and condiments")],
     }
-    item_b = {
-        "component_label": "SEASONING",
-        "by_category": [_candidate("5.1", "permitted_with_conditions", conditions="Group I text", category_name="Cocoa")],
-        "confirmed_fcs_code": "5.1",
+    row = _additive_row(item, None)
+    assert row["where"] == "SEASONING: Seasonings and condiments (12.2.2)"
+
+
+def test_additive_row_headline_only_blocking_item_has_no_category_columns():
+    # not_authorised_eu with no by_category at all -- absence/prohibition
+    # is jurisdiction-wide, not category-dependent, so there is no
+    # category row to fill Maximum amount/In force since/Where from.
+    item = {
+        "eu_canonical_id": "999",
+        "additive_name": "Fast Green FCF",
+        "component_label": None,
+        "confirmed_fcs_code": None,
+        "flags": ["prohibited"],
+        "by_category": [],
     }
-    assert _permitted_group_key(item_a) != _permitted_group_key(item_b)
+    row = _additive_row(item, None)
+    assert row["status"] == "Not allowed in the EU"
+    assert row["max_amount"] == "—"
+    assert row["in_force"] == "—"
+    assert row["where"] == "—"
+
+
+def test_additive_row_no_eu_id_omits_the_parenthetical():
+    item = {
+        "eu_canonical_id": None,
+        "additive_name": "Something unidentified",
+        "component_label": None,
+        "confirmed_fcs_code": None,
+        "flags": [],
+        "by_category": [],
+    }
+    assert _additive_row(item, None)["additive"] == "Something unidentified"
+
+
+def test_detail_lead_line_not_permitted_in_category_names_the_category():
+    item = {
+        "eu_canonical_id": "551",
+        "additive_name": "Silicon dioxide",
+        "component_label": None,
+        "confirmed_fcs_code": "15.1",
+        "flags": [],
+        "by_category": [_candidate("15.1", "not_permitted_in_category", category_name="Savoury snacks")],
+    }
+    row = _additive_row(item, None)
+    assert _detail_lead_line(row) == "Silicon dioxide is not permitted for use in Savoury snacks (15.1)."
+
+
+def test_detail_lead_line_allowed_with_conditions_points_at_the_text_below():
+    item = {
+        "eu_canonical_id": "330",
+        "additive_name": "Citric acid",
+        "component_label": None,
+        "confirmed_fcs_code": "14.1.4",
+        "flags": [],
+        "by_category": [
+            _candidate(
+                "14.1.4", "permitted_with_conditions", category_name="Flavoured drinks", conditions="only sport drinks"
+            )
+        ],
+    }
+    row = _additive_row(item, None)
+    assert _detail_lead_line(row) == (
+        "Citric acid is allowed in Flavoured drinks (14.1.4), subject to the condition below — "
+        "read it before using this ingredient here."
+    )
+
+
+def test_detail_lead_line_allowed_no_conditions_is_a_short_statement():
+    item = {
+        "eu_canonical_id": "300",
+        "additive_name": "Ascorbic acid",
+        "component_label": None,
+        "confirmed_fcs_code": "1.5",
+        "flags": [],
+        "by_category": [_candidate("1.5", "permitted_qs", category_name="Dehydrated milk")],
+    }
+    row = _additive_row(item, None)
+    assert _detail_lead_line(row) == "Ascorbic acid is allowed in Dehydrated milk (1.5)."
+
+
+def test_detail_lead_line_eu_wide_block_uses_blocking_reason():
+    item = {
+        "eu_canonical_id": "171",
+        "additive_name": "Titanium dioxide",
+        "component_label": None,
+        "confirmed_fcs_code": None,
+        "flags": ["prohibited"],
+        "by_category": [],
+    }
+    row = _additive_row(item, None)
+    lead = _detail_lead_line(row)
+    assert lead.startswith("Titanium dioxide is prohibited")
 
 
 # ---- Group I/II/... shared-block dedup (_normalize_conditions,
@@ -530,9 +627,8 @@ def test_group_conditions_map_excludes_merged_multi_clause_items():
 
 
 def test_group_conditions_map_spans_items_regardless_of_category_or_component():
-    # This is the case _permitted_group_key alone cannot dedupe: the same
-    # clause under a DIFFERENT category/component still collapses to one
-    # shared-block entry.
+    # The same clause under a DIFFERENT category/component still collapses
+    # to one shared-block entry.
     item_a = {
         "component_label": "CRISPS",
         "by_category": [_candidate("14.1.4", "permitted_qs", conditions=_QS_CLAUSE_ONE_LINE)],

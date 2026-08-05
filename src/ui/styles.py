@@ -161,61 +161,7 @@ a:hover { text-decoration-color: var(--ink); }
 .eu-badge.blocked { border-color: var(--blocked); color: var(--blocked); }
 .eu-badge.permitted { border-color: var(--permitted); color: var(--permitted); }
 
-/* ---- verdict strip: the signature element -----------------------------*/
-.eu-strip { margin: 0.6rem 0 0.9rem; }
-.eu-strip-head { font-size: 1rem; margin-bottom: 0.4rem; }
-.eu-strip-head .eu-strip-name { font-weight: 600; }
-.eu-strip-head .eu-code { margin-right: 0.5rem; color: var(--muted); }
-.eu-strip-head .eu-strip-component { color: var(--muted); font-size: 0.85rem; margin-left: 0.4rem; }
-
-.eu-strip-blocks { display: flex; flex-wrap: wrap; border: 1px solid var(--rule); }
-.eu-block {
-    flex: 1 1 220px;
-    padding: 0.5rem 0.75rem;
-    border-right: 1px solid var(--rule);
-    border-top: 3px solid transparent;
-    font-size: 0.85rem;
-    background: transparent;
-}
-.eu-block:last-child { border-right: none; }
-/* Low-opacity tint of the status colour itself (not a fixed fill), so it
-stays legible whether the surface underneath is light or dark. */
-.eu-block[data-bucket="permitted"] {
-    background: color-mix(in srgb, var(--permitted) 16%, transparent);
-    border-top-color: var(--permitted);
-}
-.eu-block[data-bucket="blocked"] {
-    background: color-mix(in srgb, var(--blocked) 16%, transparent);
-    border-top-color: var(--blocked);
-}
-.eu-block[data-bucket="neutral"] { border-top-color: var(--rule); }
-.eu-block-category { color: var(--muted); font-size: 0.82rem; }
-.eu-block .eu-block-verdict { display: block; margin-top: 0.15rem; }
-.eu-block[data-bucket="permitted"] .eu-block-verdict { color: var(--permitted); }
-.eu-block[data-bucket="blocked"] .eu-block-verdict { color: var(--blocked); }
-.eu-block[data-bucket="neutral"] .eu-block-verdict { color: var(--muted); }
-.eu-block[data-confirmed="true"] { outline: 1px solid var(--ink); outline-offset: -1px; }
-/* The other pre-confirmation candidates, shown alongside the confirmed one
-so the stakes of the confirmation choice stay visible -- see
-verdict_strip_html's docstring in src/ui/components.py. */
-.eu-block[data-dimmed="true"] { opacity: 0.5; }
-.eu-block-confirmed-tag {
-    display: block;
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: var(--ink);
-    margin-top: 0.2rem;
-}
-.eu-divergence {
-    font-size: 0.78rem;
-    color: var(--conflict);
-    margin-top: 0.35rem;
-    border-left: 2px solid var(--conflict);
-    padding-left: 0.5rem;
-}
-
-/* ---- simple hairline tables (substitutes) -----------------------------*/
+/* ---- tables (additives, substitutes, out-of-scope, horizon) -----------*/
 .eu-table { width: 100%; border-collapse: collapse; margin: 0.5rem 0 1rem; font-size: 0.85rem; }
 .eu-table th, .eu-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--rule); }
 .eu-table th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.02em; }

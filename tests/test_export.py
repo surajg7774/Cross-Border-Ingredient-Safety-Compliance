@@ -204,6 +204,30 @@ def test_to_json_includes_narration_and_nothing_dropped():
     assert result["narration"]["unfaithful_claims"] == ["E999 (not found in the assessment)"]
     assert result["substitutes"]["suggestions"][0]["blocked_eu_canonical_id"] == "171"
     assert result["horizon"]["signals"][0]["eu_canonical_id"] == "171"
+    assert "agent_review" not in result  # omitted entirely, not null/{}, when nothing was asked
+
+
+def test_to_json_includes_agent_review_when_provided():
+    # The review-queue assistant's full trace (tool_calls, evidence,
+    # reasoning) lives only in app.py's session state -- app.py builds and
+    # passes this dict explicitly; to_json itself never reaches into
+    # session state. JSON-only: see to_json's own docstring for why CSV/PDF
+    # deliberately do not receive this.
+    agent_review = {
+        4: {
+            "decision": "accepted",
+            "proposed_classification": "additive",
+            "confidence": "high",
+            "evidence": ["list_family_members returned 3 candidates"],
+            "tool_calls": [{"tool": "list_family_members", "args": {}, "result_summary": "3 found"}],
+            "declined": False,
+            "decline_reason": None,
+        }
+    }
+    result = json.loads(to_json(_verdict(), _substitutes(), _horizon(), _narration(), agent_review=agent_review))
+    assert result["agent_review"]["4"]["decision"] == "accepted"
+    assert result["agent_review"]["4"]["tool_calls"][0]["tool"] == "list_family_members"
+    assert result["agent_review"]["4"]["evidence"] == ["list_family_members returned 3 candidates"]
 
 
 def test_to_csv_has_one_row_per_item_including_unresolved():

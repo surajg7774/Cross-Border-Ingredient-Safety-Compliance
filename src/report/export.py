@@ -137,15 +137,39 @@ class ReportIdentity:
 # =========================================================================== #
 # JSON
 # =========================================================================== #
-def to_json(verdict: ProductVerdict, substitutes: SubstituteResult, horizon: HorizonResult, narration: Narration) -> str:
+def to_json(
+    verdict: ProductVerdict,
+    substitutes: SubstituteResult,
+    horizon: HorizonResult,
+    narration: Narration,
+    agent_review: dict | None = None,
+) -> str:
     """The full structured result, including the narration -- nothing
-    dropped. Every field the UI reads from these four objects is here."""
+    dropped. Every field the UI reads from these four objects is here.
+
+    `agent_review` (item_id -> {"decision": ..., **AgentProposal fields})
+    is the review-queue assistant's full trace -- tool_calls, evidence,
+    reasoning -- for every item a human asked it about, however that
+    request was resolved. It exists ONLY in app.py's st.session_state
+    (src.agent.resolver_agent.AgentProposal is never part of ProductVerdict
+    or any other object this module already receives), so app.py builds
+    and passes it explicitly; this module does not know how to construct
+    it and never reaches into session state itself. None/omitted (the
+    default) means no item was ever sent to the assistant this run -- the
+    key is left out of the payload entirely rather than written as `null`
+    or `{}`, so its absence is unambiguous. Deliberately JSON-only: CSV
+    rows and the PDF are both human-facing summary documents, and a
+    multi-step tool-call trace does not belong in either -- see app.py's
+    render_export_section for the same reasoning applied to the UI these
+    formats mirror."""
     payload = {
         "verdict": verdict.model_dump(),
         "substitutes": substitutes.model_dump(),
         "horizon": horizon.model_dump(),
         "narration": narration.model_dump(),
     }
+    if agent_review:
+        payload["agent_review"] = agent_review
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 

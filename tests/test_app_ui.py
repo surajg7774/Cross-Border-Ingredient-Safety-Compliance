@@ -122,7 +122,7 @@ from src.ui import components
 item_a = {item_a!r}
 item_b = {item_b!r}
 registry = components.render_group_conditions_block([item_a, item_b])
-components.render_permitted_section("Permitted", [item_a, item_b], group_registry=registry)
+components.render_additives_table([item_a, item_b], group_registry=registry)
 """
 
 
@@ -229,12 +229,12 @@ _ICE_CREAM_GROUP_I_CONDITIONS = (
 
 
 def _render_single_conditions_script(eu_id: str, conditions: str) -> str:
-    # render_verdict_row, not render_group_conditions_block: the latter
-    # only renders items whose conditions are a PURE Group clause
+    # render_additives_table, not render_group_conditions_block: the
+    # latter only renders items whose conditions are a PURE Group clause
     # (_pure_group_match) -- Chipsmain E551 (a named-substance clause, not
     # a Group one) and the Ice-cream merged 2-clause string (correctly
     # excluded by _pure_group_match's own merged-clause guard) would both
-    # render NOTHING through it. render_verdict_row calls
+    # render NOTHING through it. render_additives_table calls
     # _render_conditions_body unconditionally for any item's own
     # conditions (no group_registry passed here), so it exercises the
     # actual code path every item's conditions go through by default.
@@ -243,7 +243,7 @@ def _render_single_conditions_script(eu_id: str, conditions: str) -> str:
 from src.ui import components
 
 item = {item!r}
-components.render_verdict_row(item)
+components.render_additives_table([item])
 """
 
 
@@ -252,12 +252,14 @@ def test_pepsi_e150d_conditions_render_whole_never_split_or_hidden():
         _render_single_conditions_script("150d", _PEPSI_E150D_CONDITIONS)
     ).run()
     assert not at.exception
-    markdown_html = "\n".join(m.value for m in at.markdown)
-    # Both halves of the OLD lead/rest split appear TOGETHER, in the same
-    # markdown call -- not one inline and the other missing from this join.
-    assert "Period of application:" in markdown_html
-    assert "until 31 July 2014" in markdown_html
-    assert len(at.expander) == 0  # nothing hidden -- no "Conditions of use" expander at all
+    # UI REDESIGN (ui-simplify): every row now gets exactly ONE expander
+    # (the row's own detail disclosure) -- the A4 property this locks down
+    # is that BOTH halves of the OLD lead/rest split are together INSIDE
+    # that single expander, not one inline and the other missing.
+    assert len(at.expander) == 1
+    detail_html = "\n".join(m.value for m in at.expander[0].markdown)
+    assert "Period of application:" in detail_html
+    assert "until 31 July 2014" in detail_html
 
 
 def test_pepsi_e330_conditions_render_whole_never_split_or_hidden():
@@ -265,10 +267,10 @@ def test_pepsi_e330_conditions_render_whole_never_split_or_hidden():
         _render_single_conditions_script("330", _PEPSI_E330_CONDITIONS)
     ).run()
     assert not at.exception
-    markdown_html = "\n".join(m.value for m in at.markdown)
-    assert "E 968 may" in markdown_html
-    assert "not be used except where specifically provided" in markdown_html
-    assert len(at.expander) == 0
+    assert len(at.expander) == 1
+    detail_html = "\n".join(m.value for m in at.expander[0].markdown)
+    assert "E 968 may" in detail_html
+    assert "not be used except where specifically provided" in detail_html
 
 
 def test_chips_e551_conditions_render_whole():
@@ -276,9 +278,9 @@ def test_chips_e551_conditions_render_whole():
         _render_single_conditions_script("551", _CHIPS_E551_CONDITIONS)
     ).run()
     assert not at.exception
-    markdown_html = "\n".join(m.value for m in at.markdown)
-    assert "Note 1: The additives may be added individually or in combination" in markdown_html
-    assert len(at.expander) == 0
+    assert len(at.expander) == 1
+    detail_html = "\n".join(m.value for m in at.expander[0].markdown)
+    assert "Note 1: The additives may be added individually or in combination" in detail_html
 
 
 def test_ice_cream_group_i_merged_clauses_render_as_one_list_starting_at_1():
@@ -286,19 +288,19 @@ def test_ice_cream_group_i_merged_clauses_render_as_one_list_starting_at_1():
         _render_single_conditions_script("965", _ICE_CREAM_GROUP_I_CONDITIONS)
     ).run()
     assert not at.exception
-    markdown_html = "\n".join(m.value for m in at.markdown)
-    # Both clauses present, together -- clause 2 is not hidden in an expander.
-    assert "Permitted via Group I, Additives; ML = quantum satis" in markdown_html
-    assert "Permitted via Group IV, Polyols; only energy-reduced" in markdown_html
-    assert len(at.expander) == 0
+    assert len(at.expander) == 1
+    detail_html = "\n".join(m.value for m in at.expander[0].markdown)
+    # Both clauses present, together -- clause 2 is not hidden separately.
+    assert "Permitted via Group I, Additives; ML = quantum satis" in detail_html
+    assert "Permitted via Group IV, Polyols; only energy-reduced" in detail_html
     # Rendered as one native ordered list, not two differently-styled
     # blocks -- exactly one <ol>, two <li>s.
-    assert markdown_html.count("<ol") == 1
-    assert markdown_html.count("<li>") == 2
+    assert detail_html.count("<ol") == 1
+    assert detail_html.count("<li>") == 2
     # The literal "2) " marker text is stripped before display -- the ONLY
     # numbering the reader sees is the <ol>'s own, which starts at 1 by
     # construction; the raw marker must not survive as visible text.
-    assert "2) Permitted via Group IV" not in markdown_html
+    assert "2) Permitted via Group IV" not in detail_html
 
 
 # ---- Email export: server-side SMTP only, no credential form ------------

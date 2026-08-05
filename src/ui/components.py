@@ -10,43 +10,16 @@
 # name, else Codex name, else the label's own wording) -- see app.py's
 # _enrich_additive_names -- so _display_name below only ever falls back for
 # items no name source could resolve at all.
-"""Render functions for the compliance-checker UI: the verdict strip (the
-signature element -- see app.py's module docstring), the count strip,
-verdict sections, the out-of-scope and review-queue lists, and the
-substitutes/horizon panels."""
+"""Render functions for the compliance-checker UI: the additives table (the
+signature element -- see app.py's module docstring), the count strip, the
+out-of-scope and review-queue tables, and the substitutes/horizon panels."""
 
 import html
 import re
 
 import streamlit as st
 
-# verdict string -> (plain-English label, colour bucket). The internal
-# verdict strings themselves are UNCHANGED -- they are what the JSON export
-# writes (verdict.model_dump()) and what every other module compares
-# against; only this display mapping changed. Never "banned" -- the EU
-# verdict is "not authorised as a food additive in the EU" (src/report/
-# narrator.py:65 hardcodes this same rule for the LLM narration, and
-# src/report/export.py's own _VERDICT_LABELS follows it too -- "Not
-# allowed in the EU" here previously contradicted both).
-#
-# FOLLOW-UP, not done here: this is the THIRD independent verdict-string ->
-# label mapping in the codebase (src/report/export.py has its own, and
-# narrator.py hardcodes the not_authorised_eu phrase in its prompt) -- the
-# three are free to drift, exactly as this one just did. Centralizing them
-# into one shared mapping is out of scope for this fix.
-_VERDICT_BUCKETS: dict[str, str] = {
-    "permitted_qs": "permitted",
-    "permitted_with_limit": "permitted",
-    "permitted_with_conditions": "permitted",
-    "not_permitted_in_category": "blocked",
-    "not_authorised_eu": "blocked",
-}
-_VERDICT_LABELS: dict[str, str] = {
-    "permitted_qs": "Allowed — no fixed limit",
-    "permitted_with_conditions": "Allowed — conditions to check",
-    "not_permitted_in_category": "Not allowed in this kind of food",
-    "not_authorised_eu": "Not authorised in the EU",
-}
+_PERMITTING_VERDICTS = frozenset({"permitted_qs", "permitted_with_limit", "permitted_with_conditions"})
 
 
 def _level_phrase(max_level_mg_kg: float | None) -> str:
@@ -56,11 +29,35 @@ def _level_phrase(max_level_mg_kg: float | None) -> str:
     return f"up to {level} mg/kg"
 
 
-def _verdict_label(verdict: str, max_level_mg_kg: float | None = None) -> tuple[str, str]:
-    bucket = _VERDICT_BUCKETS.get(verdict, "neutral")
-    if verdict == "permitted_with_limit":
-        return f"Allowed — {_level_phrase(max_level_mg_kg)}", bucket
-    return _VERDICT_LABELS.get(verdict, verdict.replace("_", " ")), bucket
+# UI REDESIGN (ui-simplify branch): the FOUR status strings a reader with
+# no regulatory training needs -- never a raw verdict string
+# (not_authorised_eu), never "quantum satis"/"ML" as bare terms. Whether a
+# permitting verdict reads "Allowed" or "Allowed with limits" is decided
+# by whether a REAL numeric cap exists (max_level_mg_kg), not by which of
+# the three permitting verdict strings produced it: permitted_with_
+# conditions can carry a real mg/kg limit too (96% of eu_fip rows carry
+# conditions text; src/rules/engine.py's own dosage caveat already fires
+# off max_level_mg_kg directly for exactly this reason, never off the
+# permitted_with_limit label alone) -- treating permitted_with_conditions
+# as always-just-"Allowed" would silently drop a real numeric limit from
+# the one column a reader scans for it.
+def _status_label(verdict: str, max_level_mg_kg: float | None) -> tuple[str, str]:
+    """(plain-English status, colour bucket for data-bucket=)."""
+    if verdict == "not_authorised_eu":
+        return "Not allowed in the EU", "blocked"
+    if verdict == "not_permitted_in_category":
+        return "Not allowed in this food", "blocked"
+    return ("Allowed with limits" if max_level_mg_kg is not None else "Allowed"), "permitted"
+
+
+def _max_amount_cell(verdict: str, max_level_mg_kg: float | None) -> str:
+    """The Maximum amount column: the real mg/kg figure, or "No fixed
+    limit" -- NEVER "quantum satis" as a bare term (see render_substitutes
+    for the one place that word used to leak through) -- or "—" for a
+    verdict that blocks outright, where a limit is not applicable at all."""
+    if verdict not in _PERMITTING_VERDICTS:
+        return "—"
+    return _level_phrase(max_level_mg_kg).capitalize()
 
 
 # WHY a blocking verdict blocks -- a bare name with no reason forces a
@@ -74,12 +71,16 @@ _NOT_AUTHORISED_REASON = (
     "additives, in any food category"
 )
 
-# governing_regulation value (src/rules/engine.py's _OUT_OF_SCOPE_REGULATION) -> the
-# plain-language reason shown next to an out-of-scope item.
+# governing_regulation value (src/rules/engine.py's _OUT_OF_SCOPE_REGULATION)
+# -> the plain-language reason shown next to an out-of-scope item. Regulation
+# NUMBERS are deliberately dropped from this default view -- a reader with
+# no regulatory training gets nothing from "Reg 1334/2008"; the real
+# citation stays on the item's own governing_regulation flag, untouched, in
+# the JSON export.
 _OUT_OF_SCOPE_REASONS: dict[str, str] = {
-    "Reg 1334/2008": "flavouring — regulated under Reg 1334/2008, not the additives regulation",
-    "Reg 1332/2008": "enzyme — Reg 1332/2008",
-    "not an additive": "food ingredient — not an additive",
+    "Reg 1334/2008": "a flavouring, covered by different rules",
+    "Reg 1332/2008": "an enzyme, covered by different rules",
+    "not an additive": "an ordinary food",
 }
 
 # Internal flag name -> the plain phrase shown in the substitutes table.
@@ -265,11 +266,38 @@ def _out_of_scope_reason(item: dict) -> str:
         if flag.startswith("governing_regulation:"):
             governing = flag.split(":", 1)[1].strip()
             return _OUT_OF_SCOPE_REASONS.get(governing, governing)
-    return "not an additive"
+    return "an ordinary food"
 
 
 def _substitute_flag_label(flag: str) -> str:
     return _SUBSTITUTE_FLAG_LABELS.get(flag, flag)
+
+
+# Ambiguous-name candidates (src.resolve.schemas.ResolvedItem.candidates,
+# carried on an item as "candidate: <code>" flags) are bare EU/Codex INS
+# codes ("960a") -- meaningless to a reader with no regulatory training.
+# Below this many, real names (from a code -> name lookup app.py builds off
+# refs.codex_ins) are worth showing in full; at or above it, a name-by-name
+# list is worse than a count + range -- MEASURED against data/reference/
+# label_aliases.json: "modified starch"/"modified cornstarch" both resolve
+# to 17 candidates spanning E1400-E1452, 17 long INS names is not something
+# anyone scans, but "17 possible matches (E1400-E1452)" is instantly
+# legible.
+_MANY_CANDIDATES = 6
+
+
+def candidates_phrase(codes: list[str], ins_names: dict[str, str] | None = None) -> str:
+    """`codes` (bare INS codes) as a reader-facing phrase -- real names,
+    comma-joined, when there are few; a count and the first-to-last code
+    range when there are many. A code with no entry in `ins_names` falls
+    back to "E{code}" rather than disappearing -- an unnamed candidate is
+    still a real candidate."""
+    if not codes:
+        return ""
+    if len(codes) >= _MANY_CANDIDATES:
+        return f"{len(codes)} possible matches (E{codes[0]}–E{codes[-1]})"
+    lookup = ins_names or {}
+    return ", ".join(lookup.get(code, f"E{code}") for code in codes)
 
 
 def _primary_candidate(item: dict) -> dict | None:
@@ -289,102 +317,39 @@ def _primary_candidate(item: dict) -> dict | None:
     return by_category[0]
 
 
-def verdict_strip_html(item: dict, display_name: str) -> str:
-    """The signature element: one horizontal band per additive.
+def _diverging_candidates(item: dict) -> list[dict]:
+    """The category candidates this item's verdict GENUINELY depends on --
+    empty whenever every real (non-ancestor) candidate agrees, or there is
+    only one to begin with, since there is nothing to explain in that
+    case. 2+ elements, confirmed candidate first, only when they truly
+    diverge (MEASURED case: E551 -- permitted under the confirmed 12.2.2,
+    not permitted under 15.1).
 
-    MEASURED PROBLEM this fixes: once a category is confirmed, the old
-    version only ever received a single candidate, so the strip could never
-    show why the choice mattered (e.g. Chipsmain's E551 -- permitted under
-    the confirmed 12.2.2, not permitted under 15.1). app.py now merges the
-    PRE-confirmation candidates back onto each item (see
-    _merge_preview_candidates) and marks which one was confirmed via
-    item["confirmed_fcs_code"]; this function renders all of them, full
-    colour and outlined for the confirmed one, dimmed for the rest -- and
-    still collapses to one quiet block with no divergence line whenever
-    every candidate's verdict actually agrees, confirmed or not.
-
-    DESIGN FLAW this also fixes: retrieval can return an ANCESTOR of the
-    real answer alongside it -- Khusmain's candidates were "14.1.4", "14.1"
-    and "14", where the latter two are not alternatives, they CONTAIN
-    14.1.4. eu_fip records permissions at the leaf, so a parent code always
-    renders "not permitted in this category" -- true, meaningless, and it
-    falsely claims a divergence. Ancestors of the confirmed (or, if
-    unconfirmed, the rank-1) candidate are rendered separately, unlabelled
-    with any verdict, and never count toward "verdict depends on category".
-    """
+    DESIGN FLAW this avoids re-introducing: retrieval can return an
+    ANCESTOR of the real answer alongside it -- Khusmain's candidates were
+    "14.1.4", "14.1" and "14", where the latter two are not alternatives,
+    they CONTAIN 14.1.4. eu_fip records permissions at the leaf, so a
+    parent code always evaluates "not permitted in this category" --
+    true, meaningless, and it would falsely claim a divergence. Ancestors
+    of the reference candidate (_primary_candidate -- confirmed, else the
+    first retrieved) are filtered out before any divergence check runs,
+    exactly as the original verdict strip this replaces did."""
     by_category = item.get("by_category") or []
-    eu_id = item.get("eu_canonical_id")
-    code_html = f"<span class='eu-code'>E{_esc(eu_id)}</span>" if eu_id else ""
-    component = item.get("component_label")
-    component_html = f"<span class='eu-strip-component'>in {_esc(component)}</span>" if component else ""
-    head = (
-        f"<div class='eu-strip-head'>{code_html}"
-        f"<span class='eu-strip-name'>{_esc(display_name)}</span>{component_html}</div>"
-    )
-
     if not by_category:
-        return f"<div class='eu-strip'>{head}</div>"
-
-    # Dedup by fcs_code (the confirmed candidate may also appear among the
-    # pre-confirmation ones), first occurrence wins.
+        return []
     deduped: dict[str, dict] = {}
     for cv in by_category:
         deduped.setdefault(cv["fcs_code"], cv)
     all_candidates = list(deduped.values())
 
     confirmed_code = item.get("confirmed_fcs_code")
-    reference_code = confirmed_code or all_candidates[0]["fcs_code"]
+    top = _primary_candidate(item)
+    reference_code = top["fcs_code"] if top else all_candidates[0]["fcs_code"]
 
-    # Parents of the reference candidate are not competing verdicts --
-    # split them out before any divergence logic sees them.
-    ancestors = [cv for cv in all_candidates if _is_ancestor_code(cv["fcs_code"], reference_code)]
-    candidates = [cv for cv in all_candidates if cv not in ancestors]
-
-    distinct_verdicts = {cv["verdict"] for cv in candidates}
-
-    if len(candidates) == 1 or len(distinct_verdicts) <= 1:
-        # All (non-ancestor) candidates agree, or there is only one -- one
-        # quiet block, no divergence line, regardless of confirmation.
-        primary = next((cv for cv in candidates if cv["fcs_code"] == confirmed_code), candidates[0])
-        shown = [primary]
-    else:
-        # Confirmed candidate first (stable sort keeps the rest in their
-        # original retrieval-rank order).
-        shown = sorted(candidates, key=lambda cv: cv["fcs_code"] != confirmed_code)
-
-    blocks = []
-    for cv in shown:
-        label, bucket = _verdict_label(cv["verdict"], cv.get("max_level_mg_kg"))
-        is_confirmed = confirmed_code is not None and cv["fcs_code"] == confirmed_code
-        # Only dim when there IS a confirmed candidate to contrast against
-        # -- an unconfirmed multi-candidate strip shows every block at full
-        # weight, since none of them is "the" answer yet.
-        dimmed = len(shown) > 1 and confirmed_code is not None and not is_confirmed
-        code_part = f"<span class='eu-code'>{_esc(cv['fcs_code'])}</span>"
-        if cv.get("category_name"):
-            code_part += f" <span class='eu-block-category'>{_esc(_short_category_name(cv['category_name']))}</span>"
-        tag = "<span class='eu-block-confirmed-tag'>confirmed</span>" if is_confirmed else ""
-        attrs = f"data-bucket='{bucket}' data-confirmed='{str(is_confirmed).lower()}'"
-        if dimmed:
-            attrs += " data-dimmed='true'"
-        blocks.append(
-            f"<div class='eu-block' {attrs}>{code_part}<span class='eu-block-verdict'>{_esc(label)}</span>{tag}</div>"
-        )
-
-    for cv in ancestors:
-        blocks.append(
-            f"<div class='eu-block' data-bucket='neutral' data-confirmed='false' data-dimmed='true'>"
-            f"<span class='eu-code'>{_esc(cv['fcs_code'])}</span>"
-            f"<span class='eu-block-verdict'>parent category</span></div>"
-        )
-
-    blocks_html = f"<div class='eu-strip-blocks'>{''.join(blocks)}</div>"
-
-    divergence = ""
-    if len(shown) > 1:
-        divergence = "<div class='eu-divergence'>verdict depends on category</div>"
-
-    return f"<div class='eu-strip'>{head}{blocks_html}{divergence}</div>"
+    candidates = [cv for cv in all_candidates if not _is_ancestor_code(cv["fcs_code"], reference_code)]
+    if len(candidates) <= 1 or len({cv["verdict"] for cv in candidates}) <= 1:
+        return []
+    return sorted(candidates, key=lambda cv: cv["fcs_code"] != confirmed_code)
 
 
 # headline -> which count-strip bucket it belongs to. Partitioned purely by
@@ -560,28 +525,35 @@ def _group_conditions_map(items: list[dict]) -> dict[str, dict]:
 
 def render_group_conditions_block(items: list[dict]) -> dict[str, str]:
     """Renders every DISTINCT Group clause (Group I, Group II, ...) found
-    across every item passed in -- Blocking, Category-dependent, and
-    Permitted alike, since a Category-dependent item's confirmed candidate
-    can carry the identical text a Permitted item's does, not just a
-    Permitted one -- exactly once, before any section renders. Returns
-    normalized-text -> anchor-id so render_verdict_section and
-    render_permitted_section can replace every occurrence of that text
-    with a short in-page link back here (`<a href="#anchor-id">`) instead
-    of repeating the clause verbatim per additive (MEASURED: one clause
-    alone covers 9,051 of 18,987 eu_fip rows, 47.7% of Annex II). Renders
-    nothing, and returns {}, if no item's conditions is a pure Group
-    clause -- callers can call this unconditionally."""
+    across every item passed in -- whatever its Status -- since a
+    category-dependent item's confirmed candidate can carry the identical
+    text a plainly-permitted item's does, not just a permitted one --
+    exactly once, before the additives table renders. Returns
+    normalized-text -> anchor-id so render_additives_table's per-row
+    detail (_render_citation_and_conditions) can replace every occurrence
+    of that text with a short in-page link back here
+    (`<a href="#anchor-id">`) instead of repeating the clause verbatim per
+    additive (MEASURED: one clause alone covers 9,051 of 18,987 eu_fip
+    rows, 47.7% of the EU's additive permissions list). Renders nothing,
+    and returns {}, if no item's conditions is a pure Group clause --
+    callers can call this unconditionally.
+
+    Titled "Shared conditions", not "Group conditions": "Group I"/"Group
+    II" are real EU terms that appear in the quoted law below (and are
+    explained, every time, by _group_note, immediately above the clause
+    that uses them) -- but the SECTION heading itself should not presume
+    a reader already knows what a "Group" is before reaching that
+    explanation."""
     reps = _group_conditions_map(items)
     if not reps:
         return {}
 
     registry = {normalized: f"group-conditions-{i + 1}" for i, normalized in enumerate(reps)}
 
-    st.markdown("<div class='eu-section-title'>Group conditions</div>", unsafe_allow_html=True)
+    st.markdown("<div class='eu-section-title'>Shared conditions</div>", unsafe_allow_html=True)
     st.markdown(
-        "<p class='eu-caption'>The blocks below are set once, in EU law, for an entire Group of "
-        "additives -- shown once here; each additive that carries one links back to it instead of "
-        "repeating it.</p>",
+        "<p class='eu-caption'>Some additives below share the exact same EU rule. It is shown once "
+        "here -- look for a link back to it under any additive that uses it.</p>",
         unsafe_allow_html=True,
     )
     for normalized, top in reps.items():
@@ -598,10 +570,9 @@ def _render_citation_and_conditions(
     """The citation (a real link, or an explicit "no source URL" note --
     never silence), the in-force date, and the conditions -- via
     _render_conditions_body, never split except at a merge_conditions()
-    clause boundary. Shared by render_verdict_row (one additive) and
-    _render_permitted_group (several additives that share this exact
-    block) -- so a citation or a numbered-conditions fix only has to
-    happen once.
+    clause boundary. Called from _render_additive_detail, one additive's
+    expander at a time -- kept as its own function so a citation or a
+    numbered-conditions fix only has to happen once.
 
     When `top`'s conditions is a PURE Group clause already rendered once
     by render_group_conditions_block (its anchor id is in group_registry,
@@ -656,165 +627,194 @@ def _render_citation_and_conditions(
             _render_conditions_body(conditions, top.get("note_codes"))
 
 
-def render_verdict_row(
-    item: dict,
-    names: dict[int, str] | None = None,
-    *,
-    is_blocking: bool = False,
-    group_registry: dict[str, str] | None = None,
-) -> None:
-    """One additive's full row: the verdict strip, WHY it blocks (blocking
-    section only), its citation, in-force date, and conditions."""
+# Worst-first: a reader should see what needs a decision before what
+# doesn't. Any status not in this map (should not happen -- _status_label
+# only ever returns one of these four) sorts last, not first, so a bug in
+# _status_label fails safe (buried, not falsely prioritised) rather than
+# crashing the table.
+_STATUS_SEVERITY = {
+    "Not allowed in the EU": 0,
+    "Not allowed in this food": 1,
+    "Allowed with limits": 2,
+    "Allowed": 3,
+}
+
+
+def _additive_row(item: dict, names: dict[int, str] | None) -> dict:
+    """One item's plain row content for render_additives_table --
+    Additive/Status/Maximum amount/In force since/Where -- computed from
+    the SAME primary-candidate selection (_primary_candidate) every other
+    per-item render already uses: the confirmed candidate wins, else the
+    first retrieved. `top` is None only for a headline-only block
+    (not_authorised_eu with no by_category at all -- absence/prohibition
+    is jurisdiction-wide, not category-dependent, so there is no category
+    row to look anything up against)."""
+    top = _primary_candidate(item)
     display_name = _display_name(item, names)
-    st.markdown(verdict_strip_html(item, display_name), unsafe_allow_html=True)
+    eu_id = item.get("eu_canonical_id")
+    additive = f"{display_name} (E{eu_id})" if eu_id else display_name
 
-    if is_blocking:
-        st.markdown(f"<p class='eu-caption'>{_esc(_blocking_reason(item))}</p>", unsafe_allow_html=True)
+    if top is None:
+        status, bucket = "Not allowed in the EU", "blocked"
+        max_amount, in_force, where = "—", "—", "—"
+    else:
+        status, bucket = _status_label(top["verdict"], top.get("max_level_mg_kg"))
+        max_amount = _max_amount_cell(top["verdict"], top.get("max_level_mg_kg"))
+        in_force = top.get("retrieved_date") or "—"
+        where = _category_display(top.get("fcs_code"), top.get("category_name"))
+        component = item.get("component_label")
+        if component:
+            where = f"{component}: {where}"
 
-    _render_citation_and_conditions(_primary_candidate(item), item.get("flags") or [], group_registry)
-    st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
+    return {
+        "item": item,
+        "top": top,
+        "display_name": display_name,
+        "additive": additive,
+        "status": status,
+        "bucket": bucket,
+        "max_amount": max_amount,
+        "in_force": in_force,
+        "where": where,
+    }
 
 
-def render_verdict_section(
-    title: str,
-    items: list[dict],
-    names: dict[int, str] | None = None,
-    *,
-    is_blocking: bool = False,
-    group_registry: dict[str, str] | None = None,
+def _detail_lead_line(row: dict) -> str:
+    """The plain-English sentence above the conditions text in a row's
+    expander -- what the status means for THIS product, in one sentence,
+    never a reword of the LAW itself (that stays verbatim, immediately
+    below -- see _render_citation_and_conditions). Deterministic
+    templates, not a model summary: this project has measured three
+    times elsewhere (src/report/narrator.py) that a prompt is a request,
+    not a guarantee, and getting this ONE sentence wrong (claiming a
+    condition says something it doesn't) is worse than a slightly
+    generic-but-always-true one."""
+    top = row["top"]
+    name = row["display_name"]
+    if top is None or top["verdict"] == "not_authorised_eu":
+        return f"{name} is {_blocking_reason(row['item'])}."
+    if top["verdict"] == "not_permitted_in_category":
+        return f"{name} is not permitted for use in {_category_display(top.get('fcs_code'), top.get('category_name'))}."
+    where = _category_display(top.get("fcs_code"), top.get("category_name"))
+    if top.get("conditions"):
+        return (
+            f"{name} is allowed in {where}, subject to the condition below — read it before using "
+            "this ingredient here."
+        )
+    return f"{name} is allowed in {where}."
+
+
+def _render_additive_detail(row: dict, group_registry: dict[str, str] | None) -> None:
+    """Everything that doesn't fit a table cell: the plain-English lead
+    line, which part of the product this depends on (only when
+    candidates genuinely diverge -- _diverging_candidates), and the
+    citation/in-force-date/conditions text verbatim
+    (_render_citation_and_conditions, unchanged machinery)."""
+    item = row["item"]
+    st.markdown(f"<p class='eu-caption'>{_esc(_detail_lead_line(row))}</p>", unsafe_allow_html=True)
+
+    diverging = _diverging_candidates(item)
+    if diverging:
+        confirmed_code = item.get("confirmed_fcs_code")
+        st.markdown(
+            "<p class='eu-caption'>This depends on which part of the product it applies to:</p>",
+            unsafe_allow_html=True,
+        )
+        lines = []
+        for cv in diverging:
+            status, _bucket = _status_label(cv["verdict"], cv.get("max_level_mg_kg"))
+            where = _category_display(cv["fcs_code"], cv.get("category_name"))
+            tag = " — confirmed" if cv["fcs_code"] == confirmed_code else ""
+            lines.append(f"<li>{_esc(status)} in {_esc(where)}{tag}.</li>")
+        st.markdown(f"<ul class='eu-caption'>{''.join(lines)}</ul>", unsafe_allow_html=True)
+
+    _render_citation_and_conditions(row["top"], item.get("flags") or [], group_registry)
+
+
+def render_additives_table(
+    items: list[dict], names: dict[int, str] | None = None, group_registry: dict[str, str] | None = None
 ) -> None:
-    """A titled group of verdict rows -- BLOCKING or CATEGORY-DEPENDENT.
-    Renders nothing when `items` is empty, so callers can invoke every
-    section unconditionally. PERMITTED items go through
-    render_permitted_section instead (see its docstring for why).
-    `group_registry` (see render_group_conditions_block) is only ever
-    passed for Category-dependent items in practice -- a Blocking item's
-    primary candidate is itself the blocking verdict, never a Group
-    permission -- but it is honoured here regardless, since nothing about
-    this function's own logic depends on that being true."""
+    """The primary results view, one row per additive: Additive / Status /
+    Maximum amount / In force since / Where -- worst-first
+    (_STATUS_SEVERITY), so a reader sees what needs a decision before
+    what doesn't. Replaces the old Blocking/Category-dependent/Permitted
+    sections and their colour-block strip: those three headline-derived
+    buckets are still exactly what determines a row's Status text, just
+    read off one plain column instead of three differently-labelled
+    sections a reader had to already understand the difference between.
+
+    Each row expands (one st.expander per row, directly below the table
+    -- the same pattern render_substitutes already uses for per-candidate
+    detail, since an HTML <table> cannot host a Streamlit widget inside a
+    <tr>) to show what does not fit a cell -- see _render_additive_detail.
+
+    No same-block grouping (contrast the old render_permitted_section):
+    "one row per additive" is now literal, and the repetition cost that
+    grouping existed to avoid is gone anyway now that conditions text is
+    collapsed behind a closed expander by default, not printed inline
+    for every additive that shares it."""
     if not items:
         return
-    st.markdown(f"<div class='eu-section-title'>{_esc(title)} ({len(items)})</div>", unsafe_allow_html=True)
-    for item in items:
-        render_verdict_row(item, names, is_blocking=is_blocking, group_registry=group_registry)
-
-
-def _permitted_group_key(item: dict) -> tuple:
-    """Items in the Permitted section never diverge by candidate category
-    (a divergent item is routed to Category-dependent instead), so the
-    primary candidate's own content -- category, verdict, level, source,
-    conditions -- fully determines what renders. Two items with an
-    identical key render the SAME block, so they are grouped instead of
-    repeating it verbatim once per additive (MEASURED: EU_productmain's
-    Group I explanation + conditions repeated 4x, word for word)."""
-    top = _primary_candidate(item)
-    if top is None:
-        return ("item", item.get("item_id"))
-    return (
-        item.get("component_label"),
-        top.get("fcs_code"),
-        top.get("category_name"),
-        top.get("verdict"),
-        top.get("max_level_mg_kg"),
-        top.get("max_level_basis"),
-        top.get("conditions"),
-        top.get("source_url"),
-        top.get("retrieved_date"),
-        tuple(top.get("note_codes") or []),
+    rows = sorted(
+        (_additive_row(item, names) for item in items),
+        key=lambda r: _STATUS_SEVERITY.get(r["status"], 99),
     )
-
-
-def _render_permitted_group(
-    group: list[dict], names: dict[int, str] | None, group_registry: dict[str, str] | None = None
-) -> None:
-    top = _primary_candidate(group[0])
-    label, bucket = (_verdict_label(top["verdict"], top.get("max_level_mg_kg")) if top else ("Allowed", "permitted"))
-    group_note_match = _GROUP_CONDITIONS_RE.match((top or {}).get("conditions") or "")
-    if group_note_match:
-        level_phrase = _level_phrase((top or {}).get("max_level_mg_kg"))
-        label = f"Allowed as part of {group_note_match.group(1)} — {level_phrase}"
-
-    names_html = " · ".join(
-        (f"<span class='eu-code'>E{_esc(item['eu_canonical_id'])}</span> " if item.get("eu_canonical_id") else "")
-        + _esc(_display_name(item, names))
-        for item in group
+    st.markdown(f"<div class='eu-section-title'>Additives ({len(rows)})</div>", unsafe_allow_html=True)
+    table_rows = "".join(
+        "<tr>"
+        f"<td>{_esc(r['additive'])}</td>"
+        f"<td><span class='eu-badge {r['bucket']}'>{_esc(r['status'])}</span></td>"
+        f"<td class='eu-code'>{_esc(r['max_amount'])}</td>"
+        f"<td class='eu-code'>{_esc(r['in_force'])}</td>"
+        f"<td>{_esc(r['where'])}</td>"
+        "</tr>"
+        for r in rows
     )
-    where = _category_display(top.get("fcs_code"), top.get("category_name")) if top else ""
-    component = group[0].get("component_label")
-    where_html = f" in {_esc(component)} ({_esc(where)})" if component and where else (f" in {_esc(where)}" if where else "")
-
     st.markdown(
-        f"<div class='eu-strip-head'><span class='eu-strip-name'>{names_html}</span></div>"
-        f"<div class='eu-strip-blocks'><div class='eu-block' data-bucket='{bucket}'>"
-        f"<span class='eu-block-verdict'>{_esc(label)}</span></div></div>"
-        + (f"<p class='eu-caption'>Applies{where_html}</p>" if where_html else ""),
+        "<table class='eu-table'><thead><tr>"
+        "<th>Additive</th><th>Status</th><th>Maximum amount</th><th>In force since</th><th>Where</th>"
+        f"</tr></thead><tbody>{table_rows}</tbody></table>",
         unsafe_allow_html=True,
     )
-    _render_citation_and_conditions(top, [], group_registry)
-    st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
 
-
-def render_permitted_section(
-    title: str,
-    items: list[dict],
-    names: dict[int, str] | None = None,
-    group_registry: dict[str, str] | None = None,
-) -> None:
-    """Like render_verdict_section, but items sharing the exact same block
-    (see _permitted_group_key) render ONCE, with every additive that
-    shares it listed together, instead of repeating the same explanation
-    and conditions text once per additive. `group_registry` (see
-    render_group_conditions_block) handles the ORTHOGONAL case this
-    doesn't: the exact same Group clause appearing under a DIFFERENT
-    category or component within this section (a different
-    _permitted_group_key, since category/component differ, but the same
-    conditions text) -- those groups still render their own head/verdict
-    block, but the conditions themselves collapse to a shared-block
-    reference."""
-    if not items:
-        return
-    st.markdown(f"<div class='eu-section-title'>{_esc(title)} ({len(items)})</div>", unsafe_allow_html=True)
-
-    groups: dict[tuple, list[dict]] = {}
-    order: list[tuple] = []
-    for item in items:
-        key = _permitted_group_key(item)
-        if key not in groups:
-            groups[key] = []
-            order.append(key)
-        groups[key].append(item)
-
-    for key in order:
-        group = groups[key]
-        if len(group) == 1:
-            render_verdict_row(group[0], names, group_registry=group_registry)
-        else:
-            _render_permitted_group(group, names, group_registry=group_registry)
+    for r in rows:
+        with st.expander(r["additive"]):
+            _render_additive_detail(r, group_registry)
 
 
 def render_out_of_scope(items: list[dict], names: dict[int, str] | None = None) -> None:
-    """Flavourings, enzymes, food ingredients -- items never assessed
-    against Annex II at all. Collapsed by default (there is nothing
-    actionable here), but present and labelled with why, so a reader can
-    tell "assessed and cleared" from "never assessed" -- an item missing
-    from every other section is not the same as a permitted one."""
+    """Flavourings, enzymes, ordinary food ingredients -- items never
+    checked against the EU's additive permissions at all. Collapsed by
+    default (there is nothing actionable here), but present and labelled
+    with why, so a reader can tell "assessed and cleared" from "never
+    assessed" -- an item missing from every other section is not the same
+    as a permitted one. Two columns, Ingredient/Why, regulation numbers
+    dropped from this default view (_out_of_scope_reason/_OUT_OF_SCOPE_
+    REASONS) -- the real citation stays on the item's own
+    governing_regulation flag in the JSON export."""
     if not items:
         return
     with st.expander(f"Out of scope ({len(items)})", expanded=False):
-        st.caption(
-            "These items were never assessed against Annex II -- they are not food additives "
-            "under this regulation at all."
+        st.caption("These aren't food additives, so this checklist doesn't apply to them.")
+        rows = "".join(
+            f"<tr><td>{_esc(_display_name(item, names))}</td><td>{_esc(_out_of_scope_reason(item))}</td></tr>"
+            for item in items
         )
-        for item in items:
-            display_name = _display_name(item, names)
-            st.markdown(
-                f"**{_esc(display_name)}** — {_esc(_out_of_scope_reason(item))}", unsafe_allow_html=True
-            )
+        st.markdown(
+            "<table class='eu-table'><thead><tr><th>Ingredient</th><th>Why</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>",
+            unsafe_allow_html=True,
+        )
 
 
-def render_review_queue(items: list[dict], names: dict[int, str] | None = None) -> None:
+def render_review_queue(
+    items: list[dict], names: dict[int, str] | None = None, ins_names: dict[str, str] | None = None
+) -> None:
     """Unresolved and ambiguous items -- work for a human to complete, not
-    an error state."""
+    an error state. `ins_names` (INS code -> real name, built by app.py
+    off refs.codex_ins) is threaded through to candidates_phrase so a
+    "candidate:" flag never shows a bare code -- see that function's own
+    docstring."""
     if not items:
         return
     st.markdown(f"<div class='eu-section-title'>Review queue ({len(items)})</div>", unsafe_allow_html=True)
@@ -830,7 +830,7 @@ def render_review_queue(items: list[dict], names: dict[int, str] | None = None) 
         candidates = [f.split(":", 1)[1].strip() for f in (item.get("flags") or []) if f.startswith("candidate:")]
         st.markdown(f"**{_esc(display_name)}** <span class='eu-badge warn'>{_esc(reason)}</span>", unsafe_allow_html=True)
         if candidates:
-            st.caption("Possible matches: " + ", ".join(candidates))
+            st.caption("Possible matches: " + candidates_phrase(candidates, ins_names))
         else:
             st.caption("No candidate match found -- needs manual identification.")
         st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
@@ -860,14 +860,16 @@ def render_substitutes(result: dict) -> None:
 
         rows = []
         for c in candidates:
-            level = f"{c['max_level_mg_kg']} mg/kg" if c.get("max_level_mg_kg") is not None else "quantum satis"
+            # Same Maximum-amount wording as the additives table -- never
+            # "quantum satis" as a bare term (see _max_amount_cell).
+            level = _max_amount_cell(c["verdict"], c.get("max_level_mg_kg"))
             flags_display = ", ".join(_substitute_flag_label(f) for f in c.get("flags") or []) or "—"
             rows.append(
                 "<tr>"
                 f"<td class='eu-code'>E{_esc(c['eu_canonical_id'])}</td>"
                 f"<td>{_esc(c.get('additive_name'))}</td>"
                 f"<td>{_esc(', '.join(c.get('shared_functional_classes') or []))}</td>"
-                f"<td>{_esc(_verdict_label(c['verdict'], c.get('max_level_mg_kg'))[0])}</td>"
+                f"<td>{_esc(_status_label(c['verdict'], c.get('max_level_mg_kg'))[0])}</td>"
                 f"<td class='eu-code'>{_esc(level)}</td>"
                 f"<td>{_esc(flags_display)}</td>"
                 "</tr>"
@@ -875,7 +877,7 @@ def render_substitutes(result: dict) -> None:
         table = (
             "<table class='eu-table'><thead><tr>"
             "<th>EU id</th><th>Name</th><th>Shared functional class</th>"
-            "<th>Verdict</th><th>Max level</th><th>Flags</th>"
+            "<th>Status</th><th>Maximum amount</th><th>Flags</th>"
             "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
         )
         st.markdown(table, unsafe_allow_html=True)
