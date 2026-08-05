@@ -110,6 +110,40 @@ _PERIOD_OF_APPLICATION_RE = re.compile(r"period of application", re.IGNORECASE)
 # a bare Group I reference would silently drop the Ribonucleotides clause).
 _MERGED_CLAUSE_MARKER_RE = re.compile(r"\n\s*\n\s*\d+\)\s")
 
+# Splits a merge_conditions() string BEFORE each numbered marker (the
+# marker itself, "2) ", "3) ", ... stays with the clause it introduces, so
+# each split piece is still individually parseable by _LEADING_CLAUSE_
+# NUMBER_RE below). This is the ONLY boundary _split_merged_clauses treats
+# as confident -- it is produced by code (row_selection.merge_conditions),
+# not by wherever eu_fip's own free-text newlines happen to fall.
+_MERGED_CLAUSE_SPLIT_RE = re.compile(r"\n\s*\n\s*(?=\d+\)\s)")
+_LEADING_CLAUSE_NUMBER_RE = re.compile(r"^\d+\)\s*")
+
+
+def _split_merged_clauses(conditions: str) -> list[str] | None:
+    """The individual clauses of a merged multi-clause conditions string,
+    each with its own leading "N) " marker stripped -- or None if
+    `conditions` does not have that shape at all. merge_conditions()
+    numbers a clause ONLY when 2+ distinct co-applicable rows were merged
+    (src/rules/row_selection.py); a single clause, however it wraps, is
+    NEVER numbered -- so None here also correctly means "this is one
+    clause", not "detection failed".
+
+    MEASURED (see _render_conditions_body): eu_fip conditions text is
+    riddled with mid-clause newlines that are NOT clause boundaries --
+    of 1194 distinct conditions strings in data/reference/eu_fip.json,
+    only 96 (8.0%) contain a first_sentence()-style sentence boundary at
+    all, and even those routinely fall mid-clause (a period inside a
+    Regulation citation, not a real full stop) -- so a raw "\\n" or a
+    sentence-boundary regex is never trusted here. The "N) " marker
+    inserted by merge_conditions is the only boundary this project
+    controls the placement of, so it is the only one treated as
+    confident."""
+    if not _MERGED_CLAUSE_MARKER_RE.search(conditions):
+        return None
+    clauses = _MERGED_CLAUSE_SPLIT_RE.split(conditions)
+    return [_LEADING_CLAUSE_NUMBER_RE.sub("", clause).strip() for clause in clauses]
+
 
 def _normalize_conditions(conditions: str) -> str:
     """Whitespace/punctuation-insensitive identity for a conditions string.
@@ -460,24 +494,49 @@ def render_verdict_caveats(items: list[dict]) -> None:
 
 def _render_conditions_body(conditions: str, note_codes: list[str] | None) -> None:
     """The conditions text itself, once the citation/date above it are
-    handled by the caller: one caption line per applicable note, first
-    line inline, the rest (if any) behind an expander. Shared by
+    handled by the caller: one caption line per applicable note, then the
+    conditions text -- as a numbered list, one <li> per clause, if
+    merge_conditions() numbered it (_split_merged_clauses), or as a
+    single block otherwise. Never split anywhere else and never hidden
+    behind an expander.
+
+    MEASURED BUG this replaces: the previous version split on the first
+    literal "\\n" in `conditions` (conditions.partition("\\n")) and put
+    everything after it behind a "Conditions of use" expander. eu_fip's
+    own newlines are mid-clause word-wraps, not clause boundaries, so
+    that consistently cut the visible text mid-thought -- e.g. Pepsimain
+    E150d showed "...Period of application:" inline with "until 31 July
+    2014" hidden in the expander; Pepsimain E330 showed "...E 968 may"
+    inline with "not be used except..." hidden. A merged string made it
+    worse: clause 1 rendered inline as plain text while clause 2+ went
+    through st.write() inside the expander, which parsed the literal
+    "2) " marker as a CommonMark ordered-list start -- so a reader saw a
+    list beginning at "2." with no "1." anywhere. Splitting only on the
+    marker merge_conditions() itself inserts, and rendering every clause
+    the SAME way, fixes both: nothing is hidden, and a merged string's
+    numbering always starts at 1 (native <ol> numbering, not the literal
+    "N) " text, which is stripped before display).
+
+    A single, long, un-numbered clause (most of them: only a merge
+    produces the marker this function looks for) still renders as one
+    block, full length, un-split -- see _split_merged_clauses' own
+    docstring for why no weaker boundary (a raw newline, a sentence-end
+    heuristic) is trusted on this data. Shared by
     _render_citation_and_conditions (one item's own conditions) and
-    render_group_conditions_block (a Group clause's shared block) so the
-    "first line inline, rest in an expander" presentation only has to be
-    right in one place."""
+    render_group_conditions_block (a Group clause's shared block) so this
+    only has to be right in one place."""
     for note in _conditions_notes(conditions):
         st.markdown(f"<p class='eu-caption'>{_esc(note)}</p>", unsafe_allow_html=True)
 
-    first_line, _, rest = conditions.partition("\n")
-    st.markdown(f"<p class='eu-caption'>{_esc(first_line)}</p>", unsafe_allow_html=True)
-    rest = rest.strip()
-    if rest or note_codes:
-        with st.expander("Conditions of use"):
-            if rest:
-                st.write(rest)
-            if note_codes:
-                st.caption("Note codes: " + ", ".join(note_codes))
+    clauses = _split_merged_clauses(conditions)
+    if clauses:
+        items = "".join(f"<li>{_esc(clause)}</li>" for clause in clauses)
+        st.markdown(f"<ol class='eu-caption'>{items}</ol>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<p class='eu-caption'>{_esc(conditions)}</p>", unsafe_allow_html=True)
+
+    if note_codes:
+        st.caption("Note codes: " + ", ".join(note_codes))
 
 
 def _group_conditions_map(items: list[dict]) -> dict[str, dict]:
@@ -537,11 +596,12 @@ def _render_citation_and_conditions(
     top: dict | None, flags: list[str], group_registry: dict[str, str] | None = None
 ) -> None:
     """The citation (a real link, or an explicit "no source URL" note --
-    never silence), the in-force date, and the conditions -- first line
-    inline, the rest behind an expander labelled what it is. Shared by
-    render_verdict_row (one additive) and _render_permitted_group (several
-    additives that share this exact block) -- so a citation or a numbered-
-    conditions fix only has to happen once.
+    never silence), the in-force date, and the conditions -- via
+    _render_conditions_body, never split except at a merge_conditions()
+    clause boundary. Shared by render_verdict_row (one additive) and
+    _render_permitted_group (several additives that share this exact
+    block) -- so a citation or a numbered-conditions fix only has to
+    happen once.
 
     When `top`'s conditions is a PURE Group clause already rendered once
     by render_group_conditions_block (its anchor id is in group_registry,

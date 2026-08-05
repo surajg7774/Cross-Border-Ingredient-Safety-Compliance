@@ -16,6 +16,7 @@ from src.ui.components import (
     _primary_candidate,
     _pure_group_match,
     _short_category_name,
+    _split_merged_clauses,
     _substitute_flag_label,
     _verdict_caveats,
     _verdict_label,
@@ -599,3 +600,102 @@ def test_order_news_signals_keeps_different_additives_grouped_and_in_first_seen_
 
 def test_order_news_signals_empty_list_returns_empty():
     assert _order_news_signals([]) == []
+
+
+# --------------------------------------------------------------------------- #
+# _split_merged_clauses -- the four MEASURED real strings from A4/A5
+# (data/outputs/verdict/{Chipsmain,Ice-creammain,Pepsimain}.json), not
+# constructed ones.
+# --------------------------------------------------------------------------- #
+_PEPSI_E150D_CONDITIONS = (
+    "Permitted via Group II, Colours at quantum satis; excluding chocolate milk and malt "
+    "products  Period of application:\nuntil 31 July 2014"
+)
+_PEPSI_E330_CONDITIONS = (
+    "Permitted via Group I, Additives; E 420, E 421, E 953, E 965, E 966 and E 967 may not be "
+    "used  E 968 may\nnot be used except where specifically provided for in this food category"
+)
+_CHIPS_E551_CONDITIONS = (
+    "Permitted via Silicon dioxide - silicates; only seasoning  Period of application:  from 1 "
+    "February 2014; Note 1: The additives may be added individually or in combination"
+)
+_ICE_CREAM_GROUP_I_CONDITIONS = (
+    "1) Permitted via Group I, Additives; ML = quantum satis; except E 425 ML = 10000 mg/kg; "
+    "E 620 to E 625, ML =\n10000 mg/kg individually or in combination, expressed as glutamic "
+    "acid;\nE 626 to E 635, ML = 500 mg/kg individually or in combination, expressed\nas "
+    "guanylic acid.\n\n2) Permitted via Group IV, Polyols; only energy-reduced or with no "
+    "added sugar"
+)
+
+
+def test_split_merged_clauses_none_for_pepsi_e150d_no_confident_boundary():
+    # A raw "\n" mid-clause ("...Period of application:\nuntil 31 July
+    # 2014") is NOT a clause marker -- must not split.
+    assert _split_merged_clauses(_PEPSI_E150D_CONDITIONS) is None
+
+
+def test_split_merged_clauses_none_for_pepsi_e330_no_confident_boundary():
+    assert _split_merged_clauses(_PEPSI_E330_CONDITIONS) is None
+
+
+def test_split_merged_clauses_none_for_chips_e551_no_confident_boundary():
+    assert _split_merged_clauses(_CHIPS_E551_CONDITIONS) is None
+
+
+def test_split_merged_clauses_splits_ice_cream_group_i_at_the_numbered_marker():
+    clauses = _split_merged_clauses(_ICE_CREAM_GROUP_I_CONDITIONS)
+    assert clauses is not None
+    assert len(clauses) == 2
+    # The "N) " marker is stripped -- native <ol> numbering supplies it.
+    assert clauses[0].startswith("Permitted via Group I, Additives; ML = quantum satis")
+    assert clauses[1] == "Permitted via Group IV, Polyols; only energy-reduced or with no added sugar"
+    # Clause 1's own internal word-wrap newlines are preserved, not
+    # treated as a further boundary -- only the merge marker is confident.
+    assert "E 620 to E 625, ML =\n10000 mg/kg" in clauses[0]
+
+
+def test_split_merged_clauses_finds_no_pre_merged_marker_in_raw_eu_fip_rows():
+    # merge_conditions's "N) " marker (src/rules/row_selection.py) is
+    # synthesized at evaluate() time when 2+ rows combine -- it does not
+    # pre-exist in eu_fip.json's own per-row conditions text, which is
+    # always a single row's own clause. Confirms _split_merged_clauses
+    # correctly returns None across the WHOLE real dataset, not just the
+    # four measured single-clause strings above.
+    import json
+
+    from config import settings
+
+    with open(settings.REFERENCE_DIR / "eu_fip.json", encoding="utf-8") as f:
+        eu_fip = json.load(f)
+    distinct = {row["conditions"] for row in eu_fip if row.get("conditions")}
+    assert len(distinct) > 1000  # sanity: this is the real, full dataset
+    assert all(_split_merged_clauses(c) is None for c in distinct)
+
+
+def test_first_sentence_style_split_would_barely_touch_real_eu_fip_conditions_text():
+    # Answers A4 investigation question 1: first_sentence (src/category/
+    # corpus.py) was never actually the mechanism behind the reported
+    # truncation -- _render_conditions_body used conditions.partition
+    # ("\n") instead (see _split_merged_clauses' own docstring) -- but the
+    # question is worth answering directly: would a sentence-boundary
+    # heuristic have done any better? MEASURED: no. Terminal punctuation
+    # is rare across eu_fip's distinct conditions strings, and where a
+    # split WOULD occur it is often a Regulation citation's or a date's
+    # own period, not a genuine clause end (see the four measured cases
+    # in tests/test_app_ui.py) -- confirming neither a raw newline nor a
+    # sentence-boundary heuristic is a confident boundary on this data;
+    # only merge_conditions's own numbered marker is.
+    import json
+
+    from config import settings
+    from src.category.corpus import first_sentence
+
+    with open(settings.REFERENCE_DIR / "eu_fip.json", encoding="utf-8") as f:
+        eu_fip = json.load(f)
+    distinct = {row["conditions"] for row in eu_fip if row.get("conditions")}
+    assert len(distinct) > 1000  # sanity: this is the real, full dataset
+
+    would_split = [c for c in distinct if first_sentence(c) != c.strip()]
+    # MEASURED: 96 of 1194 (8.0%) -- comfortably under 10%, locked in with
+    # margin so a small data update does not make this test flaky.
+    assert len(would_split) < len(distinct) * 0.10

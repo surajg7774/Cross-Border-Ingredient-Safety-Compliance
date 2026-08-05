@@ -183,6 +183,124 @@ assert registry == {}
     assert at.markdown == []
 
 
+# ---- A4/A5: conditions text must never split on a raw newline, and a
+# merged clause's numbering must start at 1, not 2 -- MEASURED real strings
+# from data/outputs/verdict/ (Chipsmain E551, Ice-creammain Group I, and
+# Pepsimain E150d/E330), not constructed text. Each is rendered through
+# render_group_conditions_block, the same public entry point
+# test_group_conditions_render_once_with_a_reference_for_the_repeat above
+# uses, so this exercises the real call path, not just the pure helper. ---
+
+# eu_fip's own "\n" mid-clause word-wrap -- NOT a clause boundary.
+# MEASURED: previously rendered inline as "...Period of application:" with
+# "until 31 July 2014" hidden behind a "Conditions of use" expander.
+_PEPSI_E150D_CONDITIONS = (
+    "Permitted via Group II, Colours at quantum satis; excluding chocolate milk and malt "
+    "products  Period of application:\nuntil 31 July 2014"
+)
+# MEASURED: previously rendered inline as "...E 968 may" with "not be used
+# except where specifically provided..." hidden in the expander.
+_PEPSI_E330_CONDITIONS = (
+    "Permitted via Group I, Additives; E 420, E 421, E 953, E 965, E 966 and E 967 may not be "
+    "used  E 968 may\nnot be used except where specifically provided for in this food category"
+)
+# MEASURED: our OWN eu_fip.json data for this row ends exactly here, with no
+# "\n" anywhere -- this case was never actually mis-split (partition("\n")
+# on a string with no "\n" returns it whole); it is included because it is
+# one of the four reported strings and must be confirmed to render whole,
+# not because it exercises the split logic differently from any other
+# single, un-merged clause.
+_CHIPS_E551_CONDITIONS = (
+    "Permitted via Silicon dioxide - silicates; only seasoning  Period of application:  from 1 "
+    "February 2014; Note 1: The additives may be added individually or in combination"
+)
+# MEASURED, genuinely merged (2 distinct eu_fip rows for E 965/968 in
+# Ice-creammain): previously rendered clause 1 inline as plain text and
+# clause 2 in the expander via st.write(), which read the literal "2) "
+# marker as a CommonMark ordered-list start -- a list beginning at "2."
+# with no "1." anywhere.
+_ICE_CREAM_GROUP_I_CONDITIONS = (
+    "1) Permitted via Group I, Additives; ML = quantum satis; except E 425 ML = 10000 mg/kg; "
+    "E 620 to E 625, ML =\n10000 mg/kg individually or in combination, expressed as glutamic "
+    "acid;\nE 626 to E 635, ML = 500 mg/kg individually or in combination, expressed\nas "
+    "guanylic acid.\n\n2) Permitted via Group IV, Polyols; only energy-reduced or with no "
+    "added sugar"
+)
+
+
+def _render_single_conditions_script(eu_id: str, conditions: str) -> str:
+    # render_verdict_row, not render_group_conditions_block: the latter
+    # only renders items whose conditions are a PURE Group clause
+    # (_pure_group_match) -- Chipsmain E551 (a named-substance clause, not
+    # a Group one) and the Ice-cream merged 2-clause string (correctly
+    # excluded by _pure_group_match's own merged-clause guard) would both
+    # render NOTHING through it. render_verdict_row calls
+    # _render_conditions_body unconditionally for any item's own
+    # conditions (no group_registry passed here), so it exercises the
+    # actual code path every item's conditions go through by default.
+    item = _group_conditions_item(eu_id, None, "14.1.4", "Flavoured drinks", conditions)
+    return f"""
+from src.ui import components
+
+item = {item!r}
+components.render_verdict_row(item)
+"""
+
+
+def test_pepsi_e150d_conditions_render_whole_never_split_or_hidden():
+    at = AppTest.from_string(
+        _render_single_conditions_script("150d", _PEPSI_E150D_CONDITIONS)
+    ).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    # Both halves of the OLD lead/rest split appear TOGETHER, in the same
+    # markdown call -- not one inline and the other missing from this join.
+    assert "Period of application:" in markdown_html
+    assert "until 31 July 2014" in markdown_html
+    assert len(at.expander) == 0  # nothing hidden -- no "Conditions of use" expander at all
+
+
+def test_pepsi_e330_conditions_render_whole_never_split_or_hidden():
+    at = AppTest.from_string(
+        _render_single_conditions_script("330", _PEPSI_E330_CONDITIONS)
+    ).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "E 968 may" in markdown_html
+    assert "not be used except where specifically provided" in markdown_html
+    assert len(at.expander) == 0
+
+
+def test_chips_e551_conditions_render_whole():
+    at = AppTest.from_string(
+        _render_single_conditions_script("551", _CHIPS_E551_CONDITIONS)
+    ).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "Note 1: The additives may be added individually or in combination" in markdown_html
+    assert len(at.expander) == 0
+
+
+def test_ice_cream_group_i_merged_clauses_render_as_one_list_starting_at_1():
+    at = AppTest.from_string(
+        _render_single_conditions_script("965", _ICE_CREAM_GROUP_I_CONDITIONS)
+    ).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    # Both clauses present, together -- clause 2 is not hidden in an expander.
+    assert "Permitted via Group I, Additives; ML = quantum satis" in markdown_html
+    assert "Permitted via Group IV, Polyols; only energy-reduced" in markdown_html
+    assert len(at.expander) == 0
+    # Rendered as one native ordered list, not two differently-styled
+    # blocks -- exactly one <ol>, two <li>s.
+    assert markdown_html.count("<ol") == 1
+    assert markdown_html.count("<li>") == 2
+    # The literal "2) " marker text is stripped before display -- the ONLY
+    # numbering the reader sees is the <ol>'s own, which starts at 1 by
+    # construction; the raw marker must not survive as visible text.
+    assert "2) Permitted via Group IV" not in markdown_html
+
+
 # ---- Email export: server-side SMTP only, no credential form ------------
 
 # A minimal but real ProductVerdict/SubstituteResult/HorizonResult/
