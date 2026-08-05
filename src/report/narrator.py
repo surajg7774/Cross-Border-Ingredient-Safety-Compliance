@@ -121,7 +121,6 @@ plus one closing line at most for shared boilerplate (conditions, category, retr
     "What needs review"     -- ONLY unresolved items, category_unknown items, and category-dependent \
 items -- never a permitted_with_conditions item (see the rule above)
     "Possible substitutes"  -- candidate replacements for blocked items, if any
-    "Regulatory horizon"    -- EFSA signals, if any, including the partial-coverage caveat
 Each value is a list of bullets -- one per additive or group, plus at most one closing boilerplate \
 line -- never one entry per individual fact or clause.
 
@@ -167,10 +166,21 @@ def _flatten_detail(detail: dict[str, list[str]]) -> str:
 
 
 def _build_prompt(verdict: ProductVerdict, substitutes: SubstituteResult, horizon: HorizonResult) -> str:
+    # The curated EFSA "regulatory horizon" lane (horizon.signals/
+    # .warnings) is not shown on screen (src/ui/components.py's
+    # render_horizon no longer renders it -- it matched nothing on every
+    # label tried) and "Regulatory horizon" is no longer a topic in
+    # _PROMPT_RULES above -- stripped here too, so the model has nothing
+    # left to write prose about that a reader could never go look at.
+    # news_signals/route_news_signals (retrieved news -- a different
+    # source, still on screen) are untouched.
+    horizon_payload = json.loads(horizon.model_dump_json())
+    horizon_payload["signals"] = []
+    horizon_payload["warnings"] = []
     payload = {
         "verdict": json.loads(verdict.model_dump_json()),
         "substitutes": json.loads(substitutes.model_dump_json()),
-        "horizon": json.loads(horizon.model_dump_json()),
+        "horizon": horizon_payload,
     }
     return _PROMPT_RULES + json.dumps(payload, indent=2)
 

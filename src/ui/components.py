@@ -600,20 +600,22 @@ def _order_news_signals(news_signals: list[dict]) -> list[dict]:
 
 
 def _render_news_signals(news_signals: list[dict]) -> None:
-    """Retrieved-and-classified news items, below the EFSA table in the
-    SAME "Regulatory horizon" section -- but visually its own block, not
-    folded into the table above, because it is a genuinely different KIND
-    of source (src/horizon/schemas.py's NewsSignal docstring: secondary
-    reporting, machine-retrieved and machine-classified against a
-    verbatim-quote check, never a hand-curated primary regulatory
-    document). The provenance line names that plainly, every time, not
-    just in an expander -- a reader should not have to click to learn
-    this is web search, not a person. Renders nothing when there is
-    nothing to show; this is additional coverage, never a required
-    section the way the EFSA table's "no signals" caption is."""
+    """Retrieved-and-classified news items, in their OWN section -- the
+    hand-curated EFSA "Regulatory horizon" lane that used to sit above
+    this no longer renders at all (it matched nothing on every label
+    tried; see render_horizon's own docstring), so this needs its own
+    section title rather than relying on that header for context. Still a
+    genuinely different KIND of source from that curated lane (src/
+    horizon/schemas.py's NewsSignal docstring: secondary reporting,
+    machine-retrieved and machine-classified against a verbatim-quote
+    check, never a hand-curated primary regulatory document) -- the
+    provenance line names that plainly, every time, not just in an
+    expander. Renders nothing when there is nothing to show; this is
+    additional coverage, never a required section."""
     if not news_signals:
         return
 
+    st.markdown("<div class='eu-section-title'>Additive news</div>", unsafe_allow_html=True)
     st.markdown(
         "<p class='eu-caption'><strong>From retrieved news</strong> — automatically retrieved from "
         "web search, not vetted by a person. Read the source before acting on any of these.</p>",
@@ -721,55 +723,17 @@ def _render_route_news(route_news_signals: list[dict], route_news_category: str 
 
 
 def render_horizon(result: dict) -> None:
-    """Regulatory-horizon signals. The "About these signals" advisory-only
-    disclaimer and the partial-coverage warnings (see docs/findings.md
-    F-12) are DELIBERATELY not rendered here at all -- results-screen
-    simplification removed that expander -- but neither is silently lost:
-    both still appear in the PDF/JSON exports (src/report/export.py's
-    _horizon_flowables includes horizon.warnings unconditionally). The
-    empty-signals case keeps its own single always-visible caption line,
-    since that is orientation ("was anything found"), not the removed
-    disclaimer. news_signals (a DIFFERENT source -- retrieved, not
-    curated; see _render_news_signals) renders below the EFSA table,
-    never merged into it. route_news_signals (India -> EU, whole-category
-    -- see _render_route_news) renders as its OWN, separately-titled
-    section after that, never merged into either."""
-    st.markdown("<div class='eu-section-title'>Regulatory horizon</div>", unsafe_allow_html=True)
-
-    signals = result.get("signals") or []
-
-    if not signals:
-        st.caption("No EFSA review signals for these additives. Coverage is partial — see the report notes.")
-    else:
-        rows = []
-        for signal in signals:
-            doi = signal.get("doi")
-            if "doi_unverified" in (signal.get("flags") or []):
-                doi_cell = f"{_esc(doi) or '—'} <span class='eu-badge warn'>unverified</span>"
-            else:
-                doi_cell = _esc(doi) or "—"
-            rows.append(
-                "<tr>"
-                f"<td class='eu-code'>E{_esc(signal['eu_canonical_id'])}</td>"
-                f"<td>{_esc(signal.get('substance_name'))}</td>"
-                f"<td>{_esc(signal.get('stage'))}</td>"
-                f"<td class='eu-code'>{_esc(signal.get('publication_date'))}</td>"
-                f"<td>{doi_cell}</td>"
-                "</tr>"
-            )
-        table = (
-            "<table class='eu-table'><thead><tr>"
-            "<th>EU id</th><th>Substance</th><th>Stage</th><th>Year</th><th>DOI</th>"
-            "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
-        )
-        st.markdown(table, unsafe_allow_html=True)
-        n_unverified = sum(1 for s in signals if "doi_unverified" in (s.get("flags") or []))
-        if n_unverified:
-            st.markdown(
-                f"<p class='eu-caption'>{n_unverified} signal(s) have a citation that has not "
-                "been verified against efsa.europa.eu -- treat as unconfirmed.</p>",
-                unsafe_allow_html=True,
-            )
-
+    """Retrieved news only -- additive-scoped (_render_news_signals, its
+    own "Additive news" section) and route-scoped (_render_route_news,
+    "Import route: India -> EU"). The hand-curated EFSA "Regulatory
+    horizon" lane (result["signals"], data/reference/horizon_signals.json,
+    5 entries) is DELIBERATELY not rendered here at all -- it matched
+    nothing on every label tried so far, so the section only ever showed
+    an empty table or the "no signals" caption, never a real result. The
+    lane itself is not deleted: result["signals"]/result["warnings"] are
+    still returned by find_horizon_signals and still reach the PDF/JSON
+    exports in full (src/report/export.py's _horizon_flowables) -- only
+    its screen (here) and narration (src/report/narrator.py's
+    _build_prompt) presence is gone."""
     _render_news_signals(result.get("news_signals") or [])
     _render_route_news(result.get("route_news_signals") or [], result.get("route_news_category"))

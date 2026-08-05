@@ -49,7 +49,12 @@ def test_candidate_option_label_includes_short_description_when_present():
     candidate = CategoryCandidate(code="4.1.1", name="entire fresh fruit and vegetables", similarity=0.63, permitted=True)
     categories = {"4.1.1": _category("4.1.1", "entire fresh fruit and vegetables", "Fruits and vegetables presented fresh from harvest.")}
     label = app._candidate_option_label(candidate, categories)
-    assert label == "4.1.1 — entire fresh fruit and vegetables — Fruits and vegetables presented fresh from harvest."
+    # Code+name bolded (the only structure st.radio options can carry --
+    # see the function's own docstring), description plain after it.
+    assert label == (
+        "**4.1.1 — entire fresh fruit and vegetables** — "
+        "Fruits and vegetables presented fresh from harvest."
+    )
 
 
 def test_candidate_option_label_name_only_when_description_absent():
@@ -60,7 +65,7 @@ def test_candidate_option_label_name_only_when_description_absent():
     candidate = CategoryCandidate(code="7.2", name="Fine bakery wares", similarity=0.63, permitted=True)
     categories = {"7.2": _category("7.2", "Fine bakery wares", None)}
     label = app._candidate_option_label(candidate, categories)
-    assert label == "7.2 — Fine bakery wares"
+    assert label == "**7.2 — Fine bakery wares**"
     assert "None" not in label
     assert "—  —" not in label
 

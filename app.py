@@ -893,11 +893,20 @@ def _short_description(description: str | None) -> str | None:
 
 
 def _candidate_option_label(candidate: CategoryCandidate, categories: dict) -> str:
-    """"{code} — {name} — {short description}" for a radio option, or just
-    "{code} — {name}" when this category has no usable description.
-    Deliberately carries no similarity score -- see render_category_
-    confirmation's "What was searched" expander for where that moved."""
-    base = f"{candidate.code} — {candidate.name}"
+    """"**{code} — {name}** — {short description}" for a radio option, or
+    just "**{code} — {name}**" when this category has no usable
+    description. st.radio options render a small markdown subset (Bold,
+    Italics, Strikethrough, Inline Code, Links, Images -- no block-level
+    markdown, no line breaks: see Streamlit's own st.radio docstring), so
+    this is the most structure a single option can carry -- bolding the
+    code+name lets a reader tell "what this is" from "why it was matched"
+    at a glance, on the one line Streamlit actually gives each option
+    (see also the CSS added to div[role="radiogroup"] label in
+    src/ui/styles.py, which puts a divider between options so each choice
+    still reads as its own block). Deliberately carries no similarity
+    score -- see render_category_confirmation's "What was searched"
+    expander for where that moved."""
+    base = f"**{candidate.code} — {candidate.name}**"
     short = _short_description(categories[candidate.code].description)
     return f"{base} — {short}" if short else base
 
@@ -1177,22 +1186,6 @@ def _reject_agent_proposal(item_id: int) -> None:
     st.session_state.agent_decisions[item_id] = "rejected"
 
 
-def _proposal_signature(proposal: AgentProposal) -> tuple:
-    """Two proposals are "the same" for dedup purposes when every field a
-    reader would actually see is identical -- used to collapse near-
-    identical review-queue entries (see _group_review_items), never to
-    compare full AgentProposal objects (tool_calls/item_id legitimately
-    differ item to item even when the conclusion is the same)."""
-    return (
-        proposal.declined,
-        proposal.decline_reason,
-        proposal.proposed_canonical_ins,
-        proposal.proposed_classification,
-        proposal.confidence,
-        proposal.reasoning,
-    )
-
-
 # proposed_classification -> plain English, no requirement that the reader
 # know what "food_ingredient"/"flavouring"/"enzyme" mean as REGULATORY
 # terms -- each names the everyday thing it is AND, for the two that are
@@ -1230,11 +1223,12 @@ def _proposal_headline(proposal: AgentProposal) -> str:
     return f"{phrase} {confidence}".strip()
 
 
-def _render_agent_proposal(item_ids: list[int], proposal: AgentProposal) -> None:
-    """Renders ONE proposal shared by every item in `item_ids` (usually
-    one, but see _group_review_items -- several near-identical review-queue
-    items, e.g. two "MODIFIED CORNSTARCH" entries, share a single render
-    and a single Accept/Reject that applies to all of them at once).
+def _render_agent_proposal(item_id: int, proposal: AgentProposal) -> None:
+    """Renders ONE item's proposal -- headline (or decline) plus its
+    Accept/Reject (or Dismiss). Called only from a row's on-demand detail
+    panel (see _render_review_item_row) once "Review" has been clicked;
+    never rendered unconditionally, so it never contributes to the table's
+    own row height.
 
     Declining is the correct outcome, not a failure -- see
     src/agent/resolver_agent.py's own module docstring ("DECLINING IS A
@@ -1258,47 +1252,19 @@ def _render_agent_proposal(item_ids: list[int], proposal: AgentProposal) -> None
             with st.expander("Why"):
                 st.write(proposal.reasoning)
 
-    key_id = item_ids[0]
     if not proposal.declined:
         col_accept, col_reject = st.columns(2)
         with col_accept:
-            if st.button("Accept", key=f"agent_accept_{key_id}", type="primary"):
-                for item_id in item_ids:
-                    _accept_agent_proposal(item_id, proposal)
+            if st.button("Accept", key=f"agent_accept_{item_id}", type="primary"):
+                _accept_agent_proposal(item_id, proposal)
                 st.rerun()
         with col_reject:
-            if st.button("Reject", key=f"agent_reject_{key_id}"):
-                for item_id in item_ids:
-                    _reject_agent_proposal(item_id)
+            if st.button("Reject", key=f"agent_reject_{item_id}"):
+                _reject_agent_proposal(item_id)
                 st.rerun()
-    elif st.button("Dismiss", key=f"agent_dismiss_{key_id}"):
-        for item_id in item_ids:
-            _reject_agent_proposal(item_id)
+    elif st.button("Dismiss", key=f"agent_dismiss_{item_id}"):
+        _reject_agent_proposal(item_id)
         st.rerun()
-
-
-def _group_review_items(items: list[dict], names: dict[int, str] | None) -> list[list[dict]]:
-    """Items with the SAME declared name that also got the SAME assistant
-    proposal (asked, not yet decided) are grouped -- MEASURED on a real
-    label: two "MODIFIED CORNSTARCH" entries produced near-identical
-    declines verbatim. Items not yet asked, or whose proposals diverge,
-    are never grouped: collapsing before proposals exist (or differ) would
-    hide a real distinction, not a duplicate."""
-    groups: list[list[dict]] = []
-    index_by_key: dict[tuple, int] = {}
-    for item in items:
-        item_id = item["item_id"]
-        display_name = item.get("additive_name") or (names or {}).get(item_id) or f"item {item_id}"
-        proposal = st.session_state.agent_proposals.get(item_id)
-        decision = st.session_state.agent_decisions.get(item_id)
-        key = (display_name, _proposal_signature(proposal)) if proposal is not None and decision is None else None
-        if key is not None and key in index_by_key:
-            groups[index_by_key[key]].append(item)
-            continue
-        if key is not None:
-            index_by_key[key] = len(groups)
-        groups.append([item])
-    return groups
 
 
 def _component_context(item: dict) -> str:
@@ -1310,53 +1276,96 @@ def _component_context(item: dict) -> str:
     return item.get("component_label") or "whole product"
 
 
-def _render_review_group(
-    group: list[dict], names: dict[int, str] | None, ins_names: dict[str, str] | None = None
-) -> None:
-    item_ids = [item["item_id"] for item in group]
-    primary = group[0]
-    primary_id = primary["item_id"]
-    display_name = primary.get("additive_name") or (names or {}).get(primary_id) or f"item {primary_id}"
-    context_label = ", ".join(dict.fromkeys(_component_context(item) for item in group))
-    candidates = [f.split(":", 1)[1].strip() for f in (primary.get("flags") or []) if f.startswith("candidate:")]
+# item_id -> whether its detail panel (proposal reasoning, Accept/Reject)
+# is currently expanded below its row -- a set, not a dict, since it only
+# ever needs "is this one open", never a value per item. Lives in
+# session_state (not a local variable) for the same reason agent_proposals/
+# agent_decisions do: it must survive the rerun a button click triggers.
+_REVIEW_EXPANDED_KEY = "agent_review_expanded"
 
-    st.markdown(f"**{html.escape(display_name)} ({html.escape(context_label)})**", unsafe_allow_html=True)
-    if len(group) > 1:
-        st.caption(f"This name appears {len(group)} times on this label.")
-    if candidates:
-        st.caption("Possible matches: " + components.candidates_phrase(candidates, ins_names))
-    else:
-        st.caption("No candidate match found -- needs manual identification.")
 
-    decision = st.session_state.agent_decisions.get(primary_id)
-    proposal = st.session_state.agent_proposals.get(primary_id)
+def _render_review_table_header() -> None:
+    col_name, col_where, col_matches, col_status, _col_action = st.columns([3, 1.3, 3, 1.6, 1.6])
+    col_name.markdown("<span class='eu-col-head'>Ingredient</span>", unsafe_allow_html=True)
+    col_where.markdown("<span class='eu-col-head'>Where</span>", unsafe_allow_html=True)
+    col_matches.markdown("<span class='eu-col-head'>Possible matches</span>", unsafe_allow_html=True)
+    col_status.markdown("<span class='eu-col-head'>Status</span>", unsafe_allow_html=True)
+    st.markdown("<div class='eu-row-rule'></div>", unsafe_allow_html=True)
 
+
+def _render_review_item_row(item: dict, names: dict[int, str] | None, ins_names: dict[str, str] | None) -> None:
+    """One item's row -- Ingredient / Where / Possible matches / Status,
+    plus a right-hand action -- followed immediately by its detail panel
+    when expanded. A real HTML <table> cannot hold a live button in a
+    cell, so this is not one: each "row" is its own st.columns() call (a
+    normal Streamlit container), which can hold a real button in any
+    column -- st.columns is what makes the buttons below possible at all.
+    Detail (an existing proposal's reasoning, Accept/Reject) renders ON
+    DEMAND, toggled by the row's own "Review" button, directly under THIS
+    row -- not lumped at the bottom of the whole table -- since Streamlit
+    draws top-to-bottom in call order and nothing stops another st.markdown
+    call between one row's columns() and the next's.
+
+    One row per real item, never merged -- two items that happen to share
+    a declared name (e.g. two "MODIFIED CORNSTARCH" entries, one inside a
+    compound-ingredient bracket, one at product level) are two genuinely
+    separate items that could resolve differently; the Where column is
+    what tells them apart, exactly as components._additive_row's own
+    Where column does for the additives table above."""
+    item_id = item["item_id"]
+    display_name = item.get("additive_name") or (names or {}).get(item_id) or f"item {item_id}"
+    where = _component_context(item)
+    candidates = [f.split(":", 1)[1].strip() for f in (item.get("flags") or []) if f.startswith("candidate:")]
+    matches = components.candidates_phrase(candidates, ins_names) if candidates else "No candidates found"
+
+    decision = st.session_state.agent_decisions.get(item_id)
+    proposal = st.session_state.agent_proposals.get(item_id)
+    expanded: set[int] = st.session_state[_REVIEW_EXPANDED_KEY]
+
+    col_name, col_where, col_matches, col_status, col_action = st.columns([3, 1.3, 3, 1.6, 1.6])
+    col_name.markdown(html.escape(display_name), unsafe_allow_html=True)
+    col_where.caption(where)
+    col_matches.caption(matches)
+
+    show_detail = False
     if decision == "accepted":
-        st.success("Accepted -- the resolution and verdict were updated.")
+        col_status.caption("Accepted")
+    elif decision == "rejected" and proposal is not None and proposal.declined:
+        # A DECLINE that was dismissed, not a rejected proposal -- re-
+        # asking the assistant would only decline again (nothing on the
+        # label changed), so there is no button here, only the real-world
+        # next step: ask the supplier.
+        col_status.caption("Unresolved")
+        with col_action:
+            st.caption("Ask the supplier which INS number they use.")
     elif decision == "rejected":
-        if proposal is not None and proposal.declined:
-            # A DECLINE that was dismissed, not a rejected proposal --
-            # re-asking the assistant would only decline again (nothing on
-            # the label changed), so there is no button here, only the
-            # real-world next step: ask the supplier.
-            st.caption("Still unresolved -- ask the supplier which INS number they use for this ingredient.")
-        else:
-            st.caption("Rejected -- left in the review queue.")
-            if st.button("Ask again", key=f"agent_ask_{primary_id}"):
+        col_status.caption("Rejected")
+        with col_action:
+            if st.button("Ask again", key=f"agent_ask_{item_id}"):
                 with st.spinner("Investigating…"):
-                    for item_id in item_ids:
-                        _ask_agent_about_item(item_id)
+                    _ask_agent_about_item(item_id)
                 st.rerun()
     elif proposal is not None:
-        _render_agent_proposal(item_ids, proposal)
+        col_status.caption("Assistant declined" if proposal.declined else "Assistant proposed")
+        is_open = item_id in expanded
+        with col_action:
+            if st.button("Hide" if is_open else "Review", key=f"agent_review_toggle_{item_id}"):
+                (expanded.discard if is_open else expanded.add)(item_id)
+                st.rerun()
+        show_detail = is_open
     else:
-        if st.button("Ask the assistant", key=f"agent_ask_{primary_id}"):
-            with st.spinner("Investigating…"):
-                for item_id in item_ids:
+        col_status.caption("Needs a decision")
+        with col_action:
+            if st.button("Ask the assistant", key=f"agent_ask_{item_id}"):
+                with st.spinner("Investigating…"):
                     _ask_agent_about_item(item_id)
-            st.rerun()
+                st.rerun()
 
-    st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
+    if show_detail and proposal is not None:
+        st.markdown(f"**{html.escape(display_name)} ({html.escape(where)})**", unsafe_allow_html=True)
+        _render_agent_proposal(item_id, proposal)
+
+    st.markdown("<div class='eu-row-rule'></div>", unsafe_allow_html=True)
 
 
 def render_agent_review_queue(
@@ -1365,16 +1374,20 @@ def render_agent_review_queue(
     """The "unresolved" slice of the review queue (identity resolution) --
     "category_unknown" items still go through components.render_review_queue
     unchanged, since those need a food-category confirmation, not an
-    identity proposal. Same section title/note styling as the plain queue,
-    with an "Ask the assistant" control (per item, and for the whole queue)
-    added below each entry. Items that turn out to share a name AND a
-    proposal render once, via _group_review_items. `ins_names` (INS code ->
-    real name) is threaded through to _render_review_group so an ambiguous
-    item's "candidate:" flags never show as bare codes."""
+    identity proposal. A table (see _render_review_table_header/
+    _render_review_item_row), one row per item, with an "Ask the
+    assistant" control per item (and for the whole queue) -- the full
+    proposal/reasoning/Accept-Reject detail only appears on demand, below
+    the row it belongs to, once its "Review" button is clicked; a table
+    this dense is not something a reader should have to scroll a wall of
+    text to reach. `ins_names` (INS code -> real name) is threaded through
+    to _render_review_item_row so an ambiguous item's "candidate:" flags
+    never show as bare codes."""
     if not items:
         return
     st.session_state.setdefault("agent_proposals", {})
     st.session_state.setdefault("agent_decisions", {})
+    st.session_state.setdefault(_REVIEW_EXPANDED_KEY, set())
 
     st.markdown(f"<div class='eu-section-title'>Review queue ({len(items)})</div>", unsafe_allow_html=True)
     st.markdown(
@@ -1391,8 +1404,9 @@ def render_agent_review_queue(
                     _ask_agent_about_item(item["item_id"])
         st.rerun()
 
-    for group in _group_review_items(items, names):
-        _render_review_group(group, names, ins_names)
+    _render_review_table_header()
+    for item in items:
+        _render_review_item_row(item, names, ins_names)
 
 
 def render_results() -> None:

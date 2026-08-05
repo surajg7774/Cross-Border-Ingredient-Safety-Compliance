@@ -124,6 +124,14 @@ a:hover { text-decoration-color: var(--ink); }
 
 /* ---- structure -------------------------------------------------------*/
 .eu-hairline { border: none; border-top: 1px solid var(--rule); margin: 1.25rem 0; }
+.eu-row-rule { border: none; border-top: 1px solid var(--rule); margin: 0.4rem 0; }
+.eu-col-head {
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+}
 .eu-section-title {
     font-weight: 600;
     letter-spacing: 0.02em;
@@ -222,7 +230,15 @@ a:hover { text-decoration-color: var(--ink); }
 }
 [data-testid="stExpander"] summary { font-weight: 600; color: var(--ink); }
 
-div[role="radiogroup"] label { font-weight: 400; color: var(--ink); }
+div[role="radiogroup"] label {
+    font-weight: 400;
+    color: var(--ink);
+    padding: 0.6rem 0.5rem !important;
+    margin: 0 !important;
+    border-bottom: 1px solid var(--rule);
+    align-items: flex-start !important;
+}
+div[role="radiogroup"] label:last-of-type { border-bottom: none; }
 
 [data-testid="stStatusWidget"], [data-testid="stExpander"] > details {
     border-radius: 0 !important;

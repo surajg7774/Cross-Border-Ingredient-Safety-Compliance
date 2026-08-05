@@ -9,7 +9,7 @@ from langchain_core.outputs import ChatGeneration, LLMResult
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from config import settings
-from src.horizon.schemas import HorizonResult
+from src.horizon.schemas import HorizonResult, HorizonSignal
 from src.report.narrator import narrate
 from src.rules.schemas import CategoryVerdict, ItemVerdict, ProductVerdict
 from src.substitutes.schemas import SubstituteResult
@@ -255,3 +255,51 @@ def test_narrator_native_backend_is_the_default(monkeypatch):
 
     assert result.model_id == "fake-model"
     fake_gemini_client.models.generate_content.assert_called_once()
+
+
+# --------------------------------------------------------------------------- #
+# TASK: the curated EFSA "regulatory horizon" lane was removed from the
+# results screen (src/ui/components.py's render_horizon no longer renders
+# it -- it matched nothing on every label tried). The model must not be
+# asked to write about something a reader can never see, and must not even
+# be given the data, in case a bad response invents something from it
+# anyway.
+# --------------------------------------------------------------------------- #
+def test_prompt_omits_regulatory_horizon_topic_and_strips_curated_signals(monkeypatch):
+    captured = {}
+
+    def _capture(prompt, model_id):
+        captured["prompt"] = prompt
+        return json.dumps({"summary": "No blocking issues found.", "detail": {}})
+
+    monkeypatch.setattr("src.report.narrator._call_model", _capture)
+
+    horizon = HorizonResult(
+        signals=[
+            HorizonSignal(
+                eu_canonical_id="171",
+                substance_name="Titanium dioxide",
+                stage="efsa_opinion",
+                title="EFSA opinion on titanium dioxide",
+                publication_date="2025",
+                doi=None,
+                doi_verified=False,
+                source_url="https://efsa.europa.eu/x",
+                years_old=1,
+                severity="advisory",
+                affects_verdict=False,
+                note=None,
+                flags=[],
+            )
+        ],
+        checked_ids=["551"],
+        warnings=["Coverage is PARTIAL: only additives in the curated dataset are checked."],
+        data_version="test",
+        data_retrieved=None,
+    )
+
+    narrate(_verdict(), _substitutes(), horizon, "fake-model")
+
+    assert "Regulatory horizon" not in captured["prompt"]
+    assert "Titanium dioxide" not in captured["prompt"]
+    assert "PARTIAL" not in captured["prompt"]

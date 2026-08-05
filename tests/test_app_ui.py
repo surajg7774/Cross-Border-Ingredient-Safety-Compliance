@@ -368,13 +368,17 @@ def test_route_news_and_additive_news_render_as_visually_distinct_sections():
     markdown_html = "\n".join(m.value for m in at.markdown)
     # Two separate section titles -- a reader is never left to guess which
     # section a given item belongs to.
-    assert "Regulatory horizon" in markdown_html
+    assert "Additive news" in markdown_html
     assert "Import route: India" in markdown_html
     assert "Titanium dioxide" in markdown_html  # the additive-scoped signal
     assert "Herbs and spices" in markdown_html  # the route-scoped signal
 
 
-def test_horizon_efsa_table_and_news_signals_both_render_and_stay_distinct():
+def test_regulatory_horizon_efsa_lane_never_renders_on_screen():
+    # TASK: the hand-curated EFSA "Regulatory horizon" lane matched
+    # nothing on every label tried -- removed from the screen entirely,
+    # even when result["signals"]/["warnings"] are non-empty (still kept
+    # for the PDF/JSON exports -- see render_horizon's own docstring).
     result = {
         "signals": [
             {
@@ -394,7 +398,7 @@ def test_horizon_efsa_table_and_news_signals_both_render_and_stay_distinct():
             }
         ],
         "checked_ids": ["955", "171"],
-        "warnings": [],
+        "warnings": ["Coverage is PARTIAL: only additives in the curated dataset are checked."],
         "data_version": "test",
         "data_retrieved": "2026-08-01",
         "news_signals": [_NEWS_SIGNAL],
@@ -402,8 +406,10 @@ def test_horizon_efsa_table_and_news_signals_both_render_and_stay_distinct():
     at = AppTest.from_string(_render_horizon_script(result)).run()
     assert not at.exception
     markdown_html = "\n".join(m.value for m in at.markdown)
-    assert "Sucralose" in markdown_html  # the EFSA (curated) signal
-    assert "Titanium dioxide" in markdown_html  # the retrieved news signal
+    assert "Regulatory horizon" not in markdown_html
+    assert "Sucralose" not in markdown_html  # the EFSA (curated) signal
+    assert "PARTIAL" not in markdown_html
+    assert "Titanium dioxide" in markdown_html  # the retrieved news signal still renders
     assert "From retrieved news" in markdown_html  # the distinct provenance label
 
 
@@ -424,7 +430,7 @@ def test_horizon_about_these_signals_expander_is_gone():
     assert at.expander == []
 
 
-# ---- Review queue: agent-assisted identity resolution --------------------
+# ---- Review queue: agent-assisted identity resolution (table) -----------
 
 # Two static items, no proposal asked yet -- exercises app.render_agent_
 # review_queue directly with the minimal session_state it actually needs
@@ -443,18 +449,28 @@ app.render_agent_review_queue(items, {}, {})
 """
 
 
+def test_review_queue_renders_as_a_table_one_row_per_item():
+    # TASK: the review queue is a table, one row per real item -- never
+    # merged, even when two items share a declared name (see the Where
+    # column below), matching the additives table's own row-per-item
+    # design.
+    at = AppTest.from_string(_REVIEW_ITEMS_SCRIPT).run(timeout=15)  # cold "import app" -- see the email-section tests' comment
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert markdown_html.count("MODIFIED CORNSTARCH") == 2  # header row excluded -- Ingredient is its own column
+    assert "Ingredient" in markdown_html and "Possible matches" in markdown_html and "Status" in markdown_html
+
+
 def test_review_queue_duplicate_names_show_distinct_component_context():
     # MEASURED case: "MODIFIED CORNSTARCH" declared once inside the
     # SEASONING bracket and once at product level -- two genuinely
-    # separate items (see _group_review_items -- they are never merged
-    # before a shared proposal exists), so the headings must be
-    # distinguishable from each other, not two identical "MODIFIED
-    # CORNSTARCH" headings.
+    # separate items, distinguished by the Where column (its own table
+    # column, not folded into the Ingredient cell).
     at = AppTest.from_string(_REVIEW_ITEMS_SCRIPT).run()
     assert not at.exception
-    markdown_html = "\n".join(m.value for m in at.markdown)
-    assert "MODIFIED CORNSTARCH (SEASONING)" in markdown_html
-    assert "MODIFIED CORNSTARCH (whole product)" in markdown_html
+    captions = [c.value for c in at.caption]
+    assert "SEASONING" in captions
+    assert "whole product" in captions
 
 
 def _review_proposal_script(proposal_literal: str, decision: str | None) -> str:
@@ -491,11 +507,26 @@ _ACCEPTABLE_PROPOSAL = (
 )
 
 
+def test_pending_proposal_row_hides_detail_until_review_is_clicked():
+    # TASK: the review queue is a table first -- detail (proposal,
+    # reasoning, Accept/Reject) only on demand. A row with a pending
+    # proposal must not dump its decline reason or Accept/Reject onto the
+    # screen unconditionally; only a "Review" button, until clicked.
+    at = AppTest.from_string(_review_proposal_script(_DECLINED_PROPOSAL, None)).run()
+    assert not at.exception
+    captions = [c.value for c in at.caption]
+    assert "Assistant declined" in captions
+    assert not any("17 different Codex INS numbers" in c for c in captions)
+    assert at.expander == []
+    assert [b.label for b in at.button] == ["Ask the assistant about the whole queue", "Review"]
+
+
 def test_declined_proposal_has_no_why_expander_just_the_reason_once():
     # TASK: the blue decline reason and the "Why" expander said the same
     # thing in different words -- keep ONE. A declined proposal's
     # reasoning adds nothing beyond decline_reason, so it gets no expander.
     at = AppTest.from_string(_review_proposal_script(_DECLINED_PROPOSAL, None)).run()
+    at = at.button(key="agent_review_toggle_1").click().run()
     assert not at.exception
     assert at.expander == []
     captions = [c.value for c in at.caption]
@@ -504,8 +535,10 @@ def test_declined_proposal_has_no_why_expander_just_the_reason_once():
 
 def test_real_proposal_keeps_its_why_expander():
     # The inverse: a non-declined proposal's reasoning genuinely adds
-    # detail the headline doesn't -- its "Why" expander must stay.
+    # detail the headline doesn't -- its "Why" expander must stay, once
+    # "Review" reveals it.
     at = AppTest.from_string(_review_proposal_script(_ACCEPTABLE_PROPOSAL, None)).run()
+    at = at.button(key="agent_review_toggle_1").click().run()
     assert not at.exception
     assert len(at.expander) == 1
     assert at.expander[0].label == "Why"
