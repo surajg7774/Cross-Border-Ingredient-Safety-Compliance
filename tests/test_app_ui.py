@@ -422,3 +422,112 @@ def test_horizon_about_these_signals_expander_is_gone():
     at = AppTest.from_string(_render_horizon_script(result)).run()
     assert not at.exception
     assert at.expander == []
+
+
+# ---- Review queue: agent-assisted identity resolution --------------------
+
+# Two static items, no proposal asked yet -- exercises app.render_agent_
+# review_queue directly with the minimal session_state it actually needs
+# for the "not yet asked" render path (agent_proposals/agent_decisions are
+# setdefault'd by the function itself); the heavier resolution/extraction/
+# verdict state is only touched once a button is actually clicked, which
+# none of these tests do (that would mean a real LLM call).
+_REVIEW_ITEMS_SCRIPT = """
+import app
+
+items = [
+    {"item_id": 1, "additive_name": "MODIFIED CORNSTARCH", "component_label": "SEASONING", "flags": []},
+    {"item_id": 2, "additive_name": "MODIFIED CORNSTARCH", "component_label": None, "flags": []},
+]
+app.render_agent_review_queue(items, {}, {})
+"""
+
+
+def test_review_queue_duplicate_names_show_distinct_component_context():
+    # MEASURED case: "MODIFIED CORNSTARCH" declared once inside the
+    # SEASONING bracket and once at product level -- two genuinely
+    # separate items (see _group_review_items -- they are never merged
+    # before a shared proposal exists), so the headings must be
+    # distinguishable from each other, not two identical "MODIFIED
+    # CORNSTARCH" headings.
+    at = AppTest.from_string(_REVIEW_ITEMS_SCRIPT).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "MODIFIED CORNSTARCH (SEASONING)" in markdown_html
+    assert "MODIFIED CORNSTARCH (whole product)" in markdown_html
+
+
+def _review_proposal_script(proposal_literal: str, decision: str | None) -> str:
+    decision_line = f'st.session_state.agent_decisions = {{1: {decision!r}}}' if decision else ""
+    return f"""
+import streamlit as st
+import app
+from src.agent.resolver_agent import AgentProposal
+
+st.session_state.agent_proposals = {{1: {proposal_literal}}}
+{decision_line}
+
+items = [
+    {{"item_id": 1, "additive_name": "MODIFIED CORNSTARCH", "component_label": "SEASONING", "flags": []}},
+]
+app.render_agent_review_queue(items, {{}}, {{}})
+"""
+
+
+_DECLINED_PROPOSAL = (
+    "AgentProposal(item_id=1, name_as_declared='MODIFIED CORNSTARCH', proposed_canonical_ins=None, "
+    "proposed_classification='unknown', confidence='low', "
+    "reasoning='The label merely states MODIFIED CORNSTARCH without specifying the exact chemical "
+    "treatment or INS number.', evidence=[], tool_calls=[], declined=True, "
+    "decline_reason='The ingredient declaration is generic and can correspond to any of 17 different "
+    "Codex INS numbers; there is insufficient information on the label.')"
+)
+
+_ACCEPTABLE_PROPOSAL = (
+    "AgentProposal(item_id=1, name_as_declared='Silicon dioxide', proposed_canonical_ins='551', "
+    "proposed_classification='additive', confidence='high', "
+    "reasoning='The declared name unambiguously matches a single Codex INS entry.', "
+    "evidence=[], tool_calls=[], declined=False, decline_reason=None)"
+)
+
+
+def test_declined_proposal_has_no_why_expander_just_the_reason_once():
+    # TASK: the blue decline reason and the "Why" expander said the same
+    # thing in different words -- keep ONE. A declined proposal's
+    # reasoning adds nothing beyond decline_reason, so it gets no expander.
+    at = AppTest.from_string(_review_proposal_script(_DECLINED_PROPOSAL, None)).run()
+    assert not at.exception
+    assert at.expander == []
+    captions = [c.value for c in at.caption]
+    assert any("17 different Codex INS numbers" in c for c in captions)
+
+
+def test_real_proposal_keeps_its_why_expander():
+    # The inverse: a non-declined proposal's reasoning genuinely adds
+    # detail the headline doesn't -- its "Why" expander must stay.
+    at = AppTest.from_string(_review_proposal_script(_ACCEPTABLE_PROPOSAL, None)).run()
+    assert not at.exception
+    assert len(at.expander) == 1
+    assert at.expander[0].label == "Why"
+
+
+def test_dismissed_decline_shows_next_step_not_a_dead_end_button():
+    # TASK: after a decline is dismissed there is nothing left to click --
+    # re-asking the assistant would only decline again -- so the button is
+    # replaced by the real next step (ask the supplier), not left dangling.
+    at = AppTest.from_string(_review_proposal_script(_DECLINED_PROPOSAL, "rejected")).run()
+    assert not at.exception
+    # The only button left is the section-level "ask about the whole
+    # queue" -- nothing item-scoped, since this item has nothing left to
+    # click.
+    assert [b.label for b in at.button] == ["Ask the assistant about the whole queue"]
+    captions = [c.value for c in at.caption]
+    assert any("ask the supplier" in c.lower() for c in captions)
+
+
+def test_rejected_real_proposal_keeps_ask_again_button():
+    # TASK: rejecting a real proposal is NOT terminal -- "Ask again" must
+    # still be offered, unlike the dismissed-decline case above.
+    at = AppTest.from_string(_review_proposal_script(_ACCEPTABLE_PROPOSAL, "rejected")).run()
+    assert not at.exception
+    assert "Ask again" in [b.label for b in at.button]

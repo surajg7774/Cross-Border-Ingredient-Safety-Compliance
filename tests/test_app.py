@@ -118,3 +118,13 @@ def test_proposal_headline_food_ingredient_says_not_an_additive():
 def test_proposal_headline_flavouring_and_enzyme_say_covered_by_different_rules():
     assert "covered by different rules" in app._proposal_headline(_proposal("flavouring", "high"))
     assert "covered by different rules" in app._proposal_headline(_proposal("enzyme", "high"))
+
+
+def test_component_context_names_the_component_or_whole_product():
+    # MEASURED case: "MODIFIED CORNSTARCH" declared twice on one label,
+    # once inside the SEASONING bracket, once at product level -- two
+    # genuinely separate items that must read as distinguishable, not
+    # identical, headings.
+    assert app._component_context({"component_label": "SEASONING"}) == "SEASONING"
+    assert app._component_context({"component_label": None}) == "whole product"
+    assert app._component_context({}) == "whole product"

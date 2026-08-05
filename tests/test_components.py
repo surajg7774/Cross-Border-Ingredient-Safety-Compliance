@@ -12,6 +12,7 @@ from src.ui.components import (
     _out_of_scope_reason,
     _period_of_application_note,
     _primary_candidate,
+    _shared_family_word,
     _short_category_name,
     _status_label,
     _substitute_flag_label,
@@ -116,12 +117,53 @@ def test_candidates_phrase_falls_back_to_e_number_for_an_unnamed_code():
     assert candidates_phrase(["960a"], None) == "E960a"
 
 
-def test_candidates_phrase_shows_count_and_range_for_many_candidates():
-    # MEASURED: "modified starch"/"modified cornstarch" both resolve to
-    # 17 candidates spanning E1400-E1452 -- 17 long INS names is not
-    # something anyone scans; a count and the range is.
+def test_candidates_phrase_names_the_family_for_many_real_candidates():
+    # MEASURED (data/reference/codex_ins.json): the real 17 candidates
+    # behind "MODIFIED CORNSTARCH" -- a code range ("E1400-E1452") says
+    # what these are numbered, not what they are; the shared family word
+    # from their real names says what they are.
+    codes = [
+        "1400", "1401", "1402", "1403", "1404", "1405", "1410", "1412", "1413",
+        "1414", "1420", "1422", "1440", "1442", "1450", "1451", "1452",
+    ]
+    ins_names = {
+        "1400": "Dextrins, roasted starch",
+        "1401": "Acid-treated starch",
+        "1402": "Alkaline-treated starch",
+        "1403": "Bleached starch",
+        "1404": "Oxidized starch",
+        "1405": "Starches, enzyme treated",
+        "1410": "Monostarch phosphate",
+        "1412": "Distarch phosphate",
+        "1413": "Phosphated distarch phosphate",
+        "1414": "Acetylated distarch phosphate",
+        "1420": "Starch acetate",
+        "1422": "Acetylated distarch adipate",
+        "1440": "Hydroxypropyl starch",
+        "1442": "Hydroxypropyl distarch phosphate",
+        "1450": "Starch sodium octenyl succinate",
+        "1451": "Acetylated oxidized starch",
+        "1452": "Starch aluminium octenyl succinate",
+    }
+    assert candidates_phrase(codes, ins_names) == "17 different starches"
+
+
+def test_candidates_phrase_falls_back_to_plain_count_with_no_names():
+    # No ins_names available -- there is nothing to derive a family word
+    # from, but the count alone is still never a code range.
     codes = ["1400", "1401", "1402", "1403", "1404", "1405", "1410"]
-    assert candidates_phrase(codes, {}) == "7 possible matches (E1400–E1410)"
+    assert candidates_phrase(codes, {}) == "7 possible matches"
+
+
+def test_shared_family_word_ignores_short_incidental_matches():
+    # "Starch acetate" and "Acid-treated starch" share "starch" (>= 4
+    # letters) but would also share short incidental substrings if the
+    # length floor were removed -- the longest qualifying match wins.
+    assert _shared_family_word(["Starch acetate", "Acid-treated starch"]) == "starch"
+
+
+def test_shared_family_word_none_when_names_share_nothing():
+    assert _shared_family_word(["Curcumin", "Riboflavin"]) is None
 
 
 def test_candidates_phrase_empty_for_no_candidates():

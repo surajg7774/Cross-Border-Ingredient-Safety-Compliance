@@ -206,25 +206,53 @@ def _substitute_flag_label(flag: str) -> str:
 # codes ("960a") -- meaningless to a reader with no regulatory training.
 # Below this many, real names (from a code -> name lookup app.py builds off
 # refs.codex_ins) are worth showing in full; at or above it, a name-by-name
-# list is worse than a count + range -- MEASURED against data/reference/
-# label_aliases.json: "modified starch"/"modified cornstarch" both resolve
-# to 17 candidates spanning E1400-E1452, 17 long INS names is not something
-# anyone scans, but "17 possible matches (E1400-E1452)" is instantly
-# legible.
+# list is worse than a family description -- MEASURED against data/
+# reference/label_aliases.json: "modified starch"/"modified cornstarch"
+# both resolve to 17 candidates spanning E1400-E1452. A code range ("E1400
+# -E1452") tells a reader with no regulatory training nothing about what
+# the substances ARE -- see _shared_family_word below.
 _MANY_CANDIDATES = 6
+
+
+def _shared_family_word(names: list[str]) -> str | None:
+    """The chemical-family stem every one of `names` shares, e.g. "starch"
+    for the 17 real codex_ins names behind "MODIFIED CORNSTARCH" (Dextrins
+    roasted starch, Monostarch phosphate, Distarch phosphate, ...) -- a
+    SUBSTRING match, not a whole-word one, since the stem is fused into a
+    compound word in most of those names ("Distarch", "Monostarch" never
+    contain "starch" as an isolated token). None when the names have no
+    word of 4+ letters in common (nothing to say, so the caller falls back
+    to a plain count)."""
+    if len(names) < 2:
+        return None
+    candidate_words = {w for w in re.split(r"[^A-Za-z]+", names[0].lower()) if len(w) >= 4}
+    shared = [w for w in candidate_words if all(w in name.lower() for name in names[1:])]
+    if not shared:
+        return None
+    return max(shared, key=len)
+
+
+def _pluralize(word: str) -> str:
+    return f"{word}es" if word.endswith(("ch", "sh", "ss", "x", "z")) else f"{word}s"
 
 
 def candidates_phrase(codes: list[str], ins_names: dict[str, str] | None = None) -> str:
     """`codes` (bare INS codes) as a reader-facing phrase -- real names,
-    comma-joined, when there are few; a count and the first-to-last code
-    range when there are many. A code with no entry in `ins_names` falls
-    back to "E{code}" rather than disappearing -- an unnamed candidate is
-    still a real candidate."""
+    comma-joined, when there are few; when there are many, the shared
+    family word from their real names ("17 different starches"), NEVER a
+    code range (E1400-E1452 says what the substances are numbered, not
+    what they are). A code with no entry in `ins_names` falls back to
+    "E{code}" rather than disappearing -- an unnamed candidate is still a
+    real candidate."""
     if not codes:
         return ""
-    if len(codes) >= _MANY_CANDIDATES:
-        return f"{len(codes)} possible matches (E{codes[0]}–E{codes[-1]})"
     lookup = ins_names or {}
+    if len(codes) >= _MANY_CANDIDATES:
+        names = [lookup[code] for code in codes if code in lookup]
+        family = _shared_family_word(names) if len(names) == len(codes) else None
+        if family:
+            return f"{len(codes)} different {_pluralize(family)}"
+        return f"{len(codes)} possible matches"
     return ", ".join(lookup.get(code, f"E{code}") for code in codes)
 
 

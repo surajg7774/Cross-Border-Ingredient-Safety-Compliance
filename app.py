@@ -35,6 +35,7 @@
 
 import html
 import json
+import logging
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -80,6 +81,8 @@ from src.substitutes.advisor import find_substitutes
 from src.substitutes.schemas import SubstituteResult
 from src.ui import components
 from src.ui.styles import CUSTOM_CSS
+
+log = logging.getLogger("app")
 
 # MEASURED CHOICE, not a UI preference: CONFIGS["baseline"] never uses a
 # user-supplied product description at all (description_scope="none") --
@@ -1058,7 +1061,12 @@ def _ask_agent_about_item(item_id: int) -> None:
         proposal = resolve_review_item(review_item, refs, llm, tools)
     except Exception as exc:  # noqa: BLE001 -- the assistant is optional; a failure must not break the results screen
         st.session_state.agent_proposals[item_id] = None
-        st.warning(f"The assistant could not investigate this item: {exc}")
+        # Logged, not shown: the exception text is developer detail (stack
+        # traces, API error internals) a reader with no technical background
+        # cannot act on -- same discipline as narrate()'s own fallback (see
+        # src/report/narrator.py).
+        log.warning("Assistant investigation failed for item %s: %s: %s", item_id, type(exc).__name__, exc)
+        st.warning("The assistant could not investigate this item. You can try again, or resolve it manually.")
         return
     st.session_state.agent_proposals[item_id] = proposal
 
@@ -1232,22 +1240,23 @@ def _render_agent_proposal(item_ids: list[int], proposal: AgentProposal) -> None
     src/agent/resolver_agent.py's own module docstring ("DECLINING IS A
     SUCCESS") -- so it is framed as work for the reader to finish, not as
     something the assistant got wrong. decline_reason is kept as
-    supporting detail, not the headline. The reasoning paragraph lives
-    behind a "Why" expander; tool_calls and evidence are internal
-    machinery (tool names like list_family_members, get_product_context)
-    that repeats what reasoning already says in plain English -- dropped
-    from this screen entirely, kept in full in the JSON export's
-    agent_review section (see render_export_section)."""
+    supporting detail, not the headline; a "Why" expander repeating the
+    same reasoning in different words would not add anything, so declined
+    proposals get none -- only a real proposal's "Why" tells a reader
+    something the headline above it does not. tool_calls and evidence are
+    internal machinery (tool names like list_family_members,
+    get_product_context) that repeats what reasoning already says in plain
+    English -- dropped from this screen entirely, kept in full in the
+    JSON export's agent_review section (see render_export_section)."""
     if proposal.declined:
         st.info("Needs your decision — this couldn't be narrowed down.")
         if proposal.decline_reason:
             st.caption(proposal.decline_reason)
     else:
         st.markdown(_proposal_headline(proposal))
-
-    if proposal.reasoning:
-        with st.expander("Why"):
-            st.write(proposal.reasoning)
+        if proposal.reasoning:
+            with st.expander("Why"):
+                st.write(proposal.reasoning)
 
     key_id = item_ids[0]
     if not proposal.declined:
@@ -1292,6 +1301,15 @@ def _group_review_items(items: list[dict], names: dict[int, str] | None) -> list
     return groups
 
 
+def _component_context(item: dict) -> str:
+    """"SEASONING", or "whole product" for an item declared at product
+    level -- same idea as components._additive_row's "Where" column, so a
+    reader can tell apart two items that share a declared name (e.g. two
+    "MODIFIED CORNSTARCH" entries, one inside a compound-ingredient
+    bracket, one at product level) without opening anything."""
+    return item.get("component_label") or "whole product"
+
+
 def _render_review_group(
     group: list[dict], names: dict[int, str] | None, ins_names: dict[str, str] | None = None
 ) -> None:
@@ -1299,9 +1317,10 @@ def _render_review_group(
     primary = group[0]
     primary_id = primary["item_id"]
     display_name = primary.get("additive_name") or (names or {}).get(primary_id) or f"item {primary_id}"
+    context_label = ", ".join(dict.fromkeys(_component_context(item) for item in group))
     candidates = [f.split(":", 1)[1].strip() for f in (primary.get("flags") or []) if f.startswith("candidate:")]
 
-    st.markdown(f"**{html.escape(display_name)}**", unsafe_allow_html=True)
+    st.markdown(f"**{html.escape(display_name)} ({html.escape(context_label)})**", unsafe_allow_html=True)
     if len(group) > 1:
         st.caption(f"This name appears {len(group)} times on this label.")
     if candidates:
@@ -1315,12 +1334,19 @@ def _render_review_group(
     if decision == "accepted":
         st.success("Accepted -- the resolution and verdict were updated.")
     elif decision == "rejected":
-        st.caption("Rejected -- left in the review queue.")
-        if st.button("Ask the assistant", key=f"agent_ask_{primary_id}"):
-            with st.spinner("Investigating…"):
-                for item_id in item_ids:
-                    _ask_agent_about_item(item_id)
-            st.rerun()
+        if proposal is not None and proposal.declined:
+            # A DECLINE that was dismissed, not a rejected proposal --
+            # re-asking the assistant would only decline again (nothing on
+            # the label changed), so there is no button here, only the
+            # real-world next step: ask the supplier.
+            st.caption("Still unresolved -- ask the supplier which INS number they use for this ingredient.")
+        else:
+            st.caption("Rejected -- left in the review queue.")
+            if st.button("Ask again", key=f"agent_ask_{primary_id}"):
+                with st.spinner("Investigating…"):
+                    for item_id in item_ids:
+                        _ask_agent_about_item(item_id)
+                st.rerun()
     elif proposal is not None:
         _render_agent_proposal(item_ids, proposal)
     else:
