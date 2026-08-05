@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image
 
 from src.extractors.base import LabelExtractor
+from src.schemas import ExtractedItem
 
 UPSCALE_FACTOR = 2
 EVIDENCE_TYPES = 5  # ingredients_keyword, nutrition_table, net_quantity, e_number_pattern, best_before
@@ -78,6 +79,9 @@ def run_extraction(image_path: str | Path, extractor: LabelExtractor, crop: bool
 
     language = gate_result.language_selected or "en"
     extraction_result = extractor.extract(extract_bytes, language)
+    extraction_result = extraction_result.model_copy(
+        update={"items": _drop_redundant_code_children(extraction_result.items)}
+    )
 
     stop_reason = None
     if not extraction_result.items:
@@ -94,6 +98,64 @@ def run_extraction(image_path: str | Path, extractor: LabelExtractor, crop: bool
         "extraction": extraction_result.model_dump(),
         "stop_reason": stop_reason,
     }
+
+
+def _drop_redundant_code_children(items: list[ExtractedItem]) -> list[ExtractedItem]:
+    """Drops a nested child item whose entire verbatim text is just the
+    additive code its parent already carries inline -- MEASURED (Khusmain):
+    the extractor sometimes emits "Citric Acid (INS 330)" as one item AND
+    a separate nested child "INS 330" (parent_item_id pointing back at it)
+    whose only content is that same code, restated. Left in, this produces
+    two ItemVerdict rows -- and two additives-table rows -- for one real
+    ingredient.
+
+    A child is dropped only when ALL of:
+      - it is nested (nesting_depth > 0, parent_item_id set)
+      - it is an ONLY child -- its parent has exactly ONE nested child,
+        this one. REGRESSION this guards against, MEASURED (Chipsmain):
+        a compound bracket like "Seasoning [..., Anticaking Agent (INS
+        470(i), INS 551)), ..., Acidity Regulator (INS 330), ...]" is one
+        parent with TWELVE children, six of them code-only (each the
+        SOLE declaration of a real, distinct additive named by
+        functional-class + code, not a restatement of anything). Without
+        this guard, every one of those six matched the conditions below
+        too (each code is a real substring of the parent's giant
+        verbatim) and would have been silently dropped -- six real
+        additives disappearing from the assessment, not a duplicate row
+        removed. A parent naming exactly ONE thing plus its OWN code,
+        split into two items, is a fundamentally different shape from a
+        compound bracket enumerating several real sub-ingredients; child
+        count is what tells them apart.
+      - it carries a real code (declared_code set, code_system != "none")
+      - its verbatim IS that code, exactly, nothing else
+      - the parent's own verbatim already contains that exact code text
+
+    A child whose verbatim is genuine descriptive text (e.g. "Natural-
+    Nature Identical Flavouring Substances", nested under "Added Khus
+    Flavour (...)" on the same label) is never touched: it carries no
+    declared_code at all, so that condition alone rules it out -- this is
+    not a general "drop every nested child" filter."""
+    by_id = {item.item_id: item for item in items}
+    child_counts: dict[int, int] = {}
+    for item in items:
+        if item.parent_item_id is not None:
+            child_counts[item.parent_item_id] = child_counts.get(item.parent_item_id, 0) + 1
+
+    kept = []
+    for item in items:
+        parent = by_id.get(item.parent_item_id) if item.parent_item_id is not None else None
+        if (
+            item.nesting_depth > 0
+            and parent is not None
+            and child_counts.get(item.parent_item_id, 0) == 1
+            and item.declared_code
+            and item.code_system != "none"
+            and item.verbatim.strip() == item.declared_code.strip()
+            and item.declared_code in parent.verbatim
+        ):
+            continue
+        kept.append(item)
+    return kept
 
 
 def _sanitise_bbox(bbox: list[float] | None) -> list[float] | None:

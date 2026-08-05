@@ -3,9 +3,9 @@ build, not renumbered afterward -- some numbers below are absent (F-01,
 F-08, F-15) because those findings were merged into another entry or
 withdrawn before being written up, not because this file is incomplete.
 F-06 was briefly a duplicate (two unrelated findings shared the number);
-the second was renumbered to F-07, the first unused ID, once noticed. 18
+the second was renumbered to F-07, the first unused ID, once noticed. 20
 findings are recorded here: F-02 through F-07, F-09 through F-14, and F-16
-through F-21.
+through F-23.
 
 ### Current operating config
 
@@ -523,3 +523,55 @@ Fraud Network reports, sitting alongside (not inside) both
 `src/horizon/lane.py`'s curated EFSA source and `src/horizon/news.py`'s
 retrieved-press source, the same three-way separate-provenance shape the
 horizon-news design report argued for between the first two.
+
+## F-23 — Redundant-code-child dedup over-matched a compound bracket; caught before it shipped
+
+`_drop_redundant_code_children` (`src/pipeline.py`) was written to fix a
+real, MEASURED duplicate: Khusmain's extraction carried "Citric Acid (INS
+330)" as one item and a separate nested child whose ENTIRE verbatim was
+just "INS 330", restating the same code -- left in, this produced two
+`ItemVerdict` rows for one real ingredient. The first predicate dropped a
+nested child whenever its verbatim was exactly its own `declared_code`
+AND that code appeared as a substring of the parent's verbatim. Correct
+for Khusmain.
+
+**Would have been wrong for Chipsmain.** Its "Seasoning [...]" item is a
+compound bracket with TWELVE children, six of them code-only: Anticaking
+Agent (INS 470(i), INS 551), Flavour Enhancers (INS 627, INS 631),
+Acidity Regulator (INS 330), Emulsifying and Stabilizing Agent (INS 471).
+Each of those six is the SOLE declaration of a real, distinct additive --
+grouped by functional class on the label, not named individually -- not
+a restatement of anything. Every one of them satisfied the first
+predicate anyway (each code is a real substring of the parent's giant
+verbatim), so applying it would have silently dropped six real additives
+from the assessment -- a false CLEAR, the direction this project treats
+as the expensive kind of wrong, not a duplicate row removed.
+
+**Caught before it shipped.** Simulated `_drop_redundant_code_children`
+directly against Chipsmain's real cached extraction JSON (16 items) --
+not against a live re-extraction, not against a hand-built fixture --
+before running any command that would have written a file. The
+simulation showed exactly the six-item drop described above. This is
+recorded as a near-miss, not a bug that shipped: `data/outputs/
+extraction/Chipsmain.json` was never written by the unfixed predicate.
+
+**Fix:** a sole-child guard -- a code-only child is only dropped when its
+parent has EXACTLY ONE nested child. A parent naming one substance plus
+its own code, split into two items, is a different shape from a
+compound bracket enumerating several real sub-ingredients; child count
+is what tells them apart. Verified against both real shapes (Khusmain:
+still dedupes; Chipsmain: now a no-op) and a reconstructed pre-fix
+Khusmain fixture, plus a new regression test in `tests/test_pipeline.py`
+using Chipsmain's real 12-child bracket verbatim.
+
+**Chipsmain itself was not regenerated.** Re-running extraction against
+it (to confirm the fixed predicate is a true no-op against the live
+cache, which it is) surfaced an UNRELATED discrepancy: the cached raw
+extraction response is dated a day newer than the saved `data/outputs/
+extraction/Chipsmain.json` (17 items in the current cache vs. 16 in the
+saved file -- an extra "Chilli" item two levels deep under "+Spices and
+Condiments (Contains Chilli)"). This is the same stage-output-drift
+phenomenon F-17 already records (stored outputs predating a newer
+extraction/fix) -- not something to patch piecemeal here. Left as-is,
+to be resolved by the full label pass along with F-17's other 9 stale
+verdict files.
