@@ -14,6 +14,7 @@ from src.horizon.news import (
     MAX_ADDITIVES_PER_RUN,
     MAX_RESULTS_CLASSIFIED_PER_ADDITIVE,
     build_news_signal,
+    check_category_consistency,
     check_modality_backstop,
     classify_and_quote,
     find_news_signals,
@@ -200,6 +201,50 @@ def test_classify_and_quote_is_case_sensitive(monkeypatch):
         news_module, "_call_model", lambda prompt, model_id: _mock_response("regulatory_review", "EFSA Opens Review")
     )
     assert classify_and_quote(result, "Titanium dioxide", "fake-model") is None
+
+
+def test_classify_and_quote_rejects_the_measured_e968_case(monkeypatch):
+    # MEASURED against a live retrieval (.cache/horizon_news_cache.json,
+    # additive 968): the model badged "regulatory_review" while quoting
+    # its own source's "Re-evaluation completed in 2023" -- a table row
+    # that says the review is DONE. The quote is a real verbatim
+    # substring (so the verbatim check alone would accept it); this is
+    # exactly the pair check_category_consistency exists to catch.
+    result = _result(
+        title="Sweeteners | EFSA - European Union",
+        content="| E 968 | Erythritol | Re-evaluation completed in 2023 as a food additive |",
+    )
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("regulatory_review", "Re-evaluation completed in 2023"),
+    )
+    assert classify_and_quote(result, "Erythritol", "fake-model") is None
+
+
+# --------------------------------------------------------------------------- #
+# check_category_consistency -- pure
+# --------------------------------------------------------------------------- #
+def test_category_consistency_rejects_regulatory_review_quoting_completion():
+    assert check_category_consistency("regulatory_review", "Re-evaluation completed in 2023") is False
+    assert check_category_consistency("regulatory_review", "EFSA adopted its opinion") is False
+
+
+def test_category_consistency_rejects_safety_opinion_quoting_ongoing():
+    assert check_category_consistency("safety_opinion", "The re-evaluation is ongoing") is False
+    assert check_category_consistency("safety_opinion", "Review still underway") is False
+
+
+def test_category_consistency_allows_matching_pairs():
+    assert check_category_consistency("regulatory_review", "Re-evaluation ongoing") is True
+    assert check_category_consistency("safety_opinion", "EFSA concludes it is safe") is True
+
+
+def test_category_consistency_does_not_judge_other_categories():
+    # market_action/consumer_alert carry no process-vs-output ambiguity --
+    # a completion/ongoing word in their quote is not a contradiction.
+    assert check_category_consistency("market_action", "Re-evaluation completed in 2023") is True
+    assert check_category_consistency("consumer_alert", "Review still ongoing") is True
 
 
 # --------------------------------------------------------------------------- #

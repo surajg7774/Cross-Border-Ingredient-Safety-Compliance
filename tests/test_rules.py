@@ -3,6 +3,7 @@
 from src.category.schemas import CategoryCandidate, CategoryQuery, CategoryResult
 from src.resolve.schemas import ResolvedItem
 from src.rules.engine import _select_row, evaluate
+from src.ui.components import count_buckets
 
 
 def _resolved(item_id, classification, eu_canonical_id=None, candidates=None, canonical_ins=None):
@@ -620,3 +621,59 @@ def test_mixed_confirmed_and_retrieved_components_keeps_retrieval_caveat():
     assert "Food category confirmed by user: product = 7.2 (Fine bakery wares)" in verdict.summary
     assert "recall@1" in verdict.summary
     assert verdict.category_source == {"(product)": "user", "INVERT SUGAR SYRUP": "retrieved"}
+
+
+def test_summary_does_not_call_permitted_with_conditions_items_manual_review():
+    # MEASURED BUG (Pepsimain): verdict.summary said "7 item(s) require
+    # manual review" while the count strip (src/ui/components.count_
+    # buckets) showed "Needs review: 0" for the SAME ProductVerdict --
+    # every one of the 7 was permitted_with_conditions, which count_
+    # buckets deliberately buckets under "Permitted, conditions to check",
+    # not "Needs review" (see count_buckets' own docstring and
+    # test_count_buckets_are_mutually_exclusive_and_sum_to_item_total in
+    # tests/test_components.py). The two must never disagree about the
+    # SAME items, even in wording -- narration hides the fallback summary
+    # on a successful run, but it must still be correct on its own.
+    eu_fip = [
+        _row("300", "9.1.1 unprocessed fish", conditions="only tuna"),
+        _row("330", "9.1.1 unprocessed fish", conditions="excluding smoked fish"),
+    ]
+    resolved = [
+        _resolved(0, "additive", eu_canonical_id="300"),
+        _resolved(1, "additive", eu_canonical_id="330"),
+    ]
+    category_results = {
+        0: _category_result("product", None, ["9.1.1"], additive_ids=["300"]),
+        1: _category_result("product", None, ["9.1.1"], additive_ids=["330"]),
+    }
+    verdict = evaluate(resolved, category_results, eu_fip)
+
+    assert [item.headline for item in verdict.items] == ["permitted_with_conditions"] * 2
+    assert verdict.review_required == [0, 1]  # unchanged -- narrator.py still relies on this
+
+    assert "require manual review" not in verdict.summary
+    assert "2 item(s) are permitted subject to conditions that must be checked" in verdict.summary
+    assert "[0, 1]" in verdict.summary
+
+    item_dicts = [item.model_dump() for item in verdict.items]
+    assert count_buckets(item_dicts)["Needs review"] == 0  # the strip this must not contradict
+
+
+def test_summary_still_names_genuinely_unresolved_items_as_needing_review():
+    # The split above must not swallow the real case: an unresolved item
+    # (no identity at all) genuinely belongs in "require manual review",
+    # and count_buckets agrees -- its headline is in _NEEDS_REVIEW_HEADLINES.
+    eu_fip = [_row("300", "9.1.1 unprocessed fish", conditions="only tuna")]
+    resolved = [
+        _resolved(0, "additive", eu_canonical_id="300"),
+        _resolved(1, "unknown"),
+    ]
+    category_results = {0: _category_result("product", None, ["9.1.1"], additive_ids=["300"])}
+    verdict = evaluate(resolved, category_results, eu_fip)
+
+    assert verdict.items[1].headline == "unresolved"
+    assert "1 item(s) require manual review (item_id [1])" in verdict.summary
+    assert "1 item(s) are permitted subject to conditions that must be checked" in verdict.summary
+
+    item_dicts = [item.model_dump() for item in verdict.items]
+    assert count_buckets(item_dicts)["Needs review"] == 1

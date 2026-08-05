@@ -864,6 +864,30 @@ _NEWS_CATEGORY_LABELS = {
 }
 
 
+def _order_news_signals(news_signals: list[dict]) -> list[dict]:
+    """`news_signals`, grouped by additive (first-appearance order
+    preserved) with each additive's own signals sorted newest
+    published_date first (missing dates last). MEASURED: Pepsimain's E950
+    got a "safety_opinion" signal (quoting a completed re-evaluation
+    that concludes it is safe) and a "regulatory_review" signal, in
+    whatever order src.horizon.news.find_news_signals happened to return
+    them -- nothing told the reader which was current. This does not
+    resolve a genuinely contradictory category/quote pair (see
+    src.horizon.news.check_category_consistency for that, a refuse-to-
+    build check upstream of this ever reaching the UI); it only orders
+    what legitimately reaches here so recency is visible without the
+    reader having to compare dates buried in each card."""
+    groups: dict[tuple, list[dict]] = {}
+    for signal in news_signals:
+        key = (signal.get("eu_canonical_id"), signal.get("substance_name"))
+        groups.setdefault(key, []).append(signal)
+    ordered: list[dict] = []
+    for group in groups.values():
+        group.sort(key=lambda s: s.get("published_date") or "", reverse=True)
+        ordered.extend(group)
+    return ordered
+
+
 def _render_news_signals(news_signals: list[dict]) -> None:
     """Retrieved-and-classified news items, below the EFSA table in the
     SAME "Regulatory horizon" section -- but visually its own block, not
@@ -884,7 +908,7 @@ def _render_news_signals(news_signals: list[dict]) -> None:
         "web search, not vetted by a person. Read the source before acting on any of these.</p>",
         unsafe_allow_html=True,
     )
-    for signal in news_signals:
+    for signal in _order_news_signals(news_signals):
         category = signal.get("category")
         category_label = _NEWS_CATEGORY_LABELS.get(category, category or "")
         st.markdown(

@@ -32,8 +32,8 @@ banned in the EU" from a headline that says something weaker).
 So the model's role is narrowed to something a prompt CAN reliably
 guarantee: classify one retrieved item into a fixed category, and point at
 a short verbatim excerpt of its own title/content as evidence. It does not
-compose. Two structural checks then run on that output, and reject rather
-than repair when a rule assessment implies actual harm:
+compose. Three structural checks then run on that output, and reject
+rather than repair when a rule assessment implies actual harm:
 
 1. quoted_span must be an exact substring of the retrieved title+content
    (whitespace-normalised only -- not case-folded, not fuzzy-matched).
@@ -41,7 +41,18 @@ than repair when a rule assessment implies actual harm:
    no NewsSignal gets built. A model that could not produce a real
    quotation gets no output at all, not a best-effort one.
 
-2. render_news_sentence deterministically builds the DISPLAYED sentence
+2. check_category_consistency then checks the category the model picked
+   against that SAME quoted_span (not the whole title/content the model
+   also saw -- see the function's own comment for the MEASURED case this
+   closes: "regulatory_review" badged over a quote that says the review
+   completed). The verbatim check above proves the quote is real; this
+   proves the badge is not contradicted by it. Category is chosen from
+   the full retrieved text, which quoted_span alone does not constrain --
+   without this, a badge can be "supported" by text the reader never
+   sees, the same failure quoted_span's own verbatim check exists to stop
+   for the sentence, just displaced onto the category field instead.
+
+3. render_news_sentence deterministically builds the DISPLAYED sentence
    from a fixed per-category template plus the verbatim quote -- never
    from anything the model wrote freely. check_modality_backstop then
    scans that rendered sentence: a severity word ("banned", "illegal",
@@ -146,13 +157,57 @@ _CATEGORY_LABELS = {
 _MODALITY_WORDS = ("banned", "ban", "illegal", "prohibited", "withdrawn", "recalled", "recall", "outlawed")
 _MODALITY_WORD_RE = re.compile(r"\b(" + "|".join(_MODALITY_WORDS) + r")\b", re.IGNORECASE)
 
+# MEASURED against a live retrieval (E 968, .cache/horizon_news_cache.json):
+# the model classified an item "regulatory_review" while its OWN quoted
+# evidence read "Re-evaluation completed in 2023" -- EFSA's own pages name
+# a finished re-evaluation report "Re-evaluation of X as a food additive",
+# identically to how they'd describe the still-open process, so nothing in
+# the category definitions given to the model disambiguates "review" the
+# process from "review" the published output. Same "reject rather than
+# repair" shape as _MODALITY_WORD_RE/check_modality_backstop, but checked
+# against quoted_span directly (the text the reader actually sees), not
+# the rendered sentence -- there is no rendered-sentence intermediary that
+# could introduce the word, category and quoted_span are already both in
+# hand inside classify_and_quote. "published" and "opened"/"launched"/
+# "initiated" are deliberately excluded from both lists: each describes an
+# action that can equally be a step within an ongoing review OR mark its
+# conclusion (e.g. "opinion published for consultation" is still ongoing),
+# so including them would reject genuinely correct pairs, not just
+# contradictory ones.
+_COMPLETION_WORDS = ("completed", "concludes", "concluded", "adopted", "finalised", "finalized")
+_ONGOING_WORDS = ("ongoing", "underway", "in progress")
+_COMPLETION_WORD_RE = re.compile(r"\b(" + "|".join(_COMPLETION_WORDS) + r")\b", re.IGNORECASE)
+_ONGOING_WORD_RE = re.compile(r"\b(" + "|".join(_ONGOING_WORDS) + r")\b", re.IGNORECASE)
+
+
+def check_category_consistency(category: str, quoted_span: str) -> bool:
+    """False if `quoted_span` itself contradicts `category` -- a
+    "regulatory_review" (an in-progress process) whose own quoted evidence
+    says the review COMPLETED, or a "safety_opinion" (a published result)
+    whose own quoted evidence says it is still ONGOING. True for every
+    other category/quoted_span pair, including market_action and
+    consumer_alert, which this function does not judge at all -- their
+    definitions do not share this specific process-vs-output ambiguity.
+    """
+    if category == "regulatory_review":
+        return not _COMPLETION_WORD_RE.search(quoted_span)
+    if category == "safety_opinion":
+        return not _ONGOING_WORD_RE.search(quoted_span)
+    return True
+
 _CLASSIFY_PROMPT_RULES = """You are classifying ONE retrieved news/press item about a food additive, \
 for a horizon-scanning feature attached to an EU food-additive compliance tool. You do NOT write a \
 summary, a headline, or any sentence of your own. You do two things only:
 
 1. Pick exactly one category from this fixed set, describing what kind of item this is:
-   - "regulatory_review": an EFSA/European Commission review, opinion process, or consultation
-   - "safety_opinion": a published safety assessment or scientific opinion
+   - "regulatory_review": an EFSA/European Commission review, opinion process, or consultation that \
+is STILL IN PROGRESS -- the text describes it as ongoing, underway, open, or not yet concluded
+   - "safety_opinion": a safety assessment or scientific opinion that has ALREADY BEEN PUBLISHED or \
+COMPLETED -- the text says the review concluded, the opinion was adopted, or states its finding \
+(e.g. "found safe", "safe at a new ADI"). A page describing a finished re-evaluation is \
+"safety_opinion" even if its own title still uses the word "review" or "re-evaluation" -- that word \
+names the process that PRODUCED the opinion, not its current status; judge status from the \
+surrounding text, not the presence of that word alone
    - "market_action": an import restriction, market withdrawal, or trade action
    - "consumer_alert": a RASFF alert or consumer-facing safety notice
    - "unrelated": the item does not genuinely concern this additive's EU regulatory status at all
@@ -247,10 +302,12 @@ def _call_model(prompt: str, model_id: str) -> str:
 def classify_and_quote(result: SearchResult, additive_name: str, model_id: str) -> tuple[str, str] | None:
     """(category, quoted_span) for `result`, or None if classification
     should produce NO signal at all -- category "unrelated", a malformed/
-    unparseable model response, an unrecognised category, or a
-    quoted_span that is not a verbatim (whitespace-normalised) substring
-    of the retrieved title+content. Every rejection path returns None,
-    never a best-effort guess -- see this module's docstring."""
+    unparseable model response, an unrecognised category, a quoted_span
+    that is not a verbatim (whitespace-normalised) substring of the
+    retrieved title+content, or a quoted_span that contradicts the
+    category chosen for it (check_category_consistency). Every rejection
+    path returns None, never a best-effort guess -- see this module's
+    docstring."""
     prompt = _build_classify_prompt(additive_name, result)
     try:
         raw = _call_model(prompt, model_id)
@@ -272,6 +329,12 @@ def classify_and_quote(result: SearchResult, additive_name: str, model_id: str) 
     source_text = _normalise_text(f"{result.title} {result.content}")
     if _normalise_text(quoted_span) not in source_text:
         log.warning("classify_and_quote: quoted_span not verbatim in source, rejecting: %r", quoted_span)
+        return None
+
+    if not check_category_consistency(category, quoted_span):
+        log.warning(
+            "classify_and_quote: quoted_span contradicts category %r, rejecting: %r", category, quoted_span
+        )
         return None
 
     return category, quoted_span

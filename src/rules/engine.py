@@ -438,6 +438,25 @@ def _build_summary(
     dosage cannot be verified from a label alone. Equally, a
     category_dependent blocking verdict must never be reported as "NOT
     PERMITTED" -- that IS the false positive this function exists to avoid.
+
+    MEASURED BUG this avoids repeating: review_required (see evaluate())
+    deliberately unions in permitted_with_conditions items -- so a human
+    remembers to check their conditions text -- but src/ui/components.py's
+    count_buckets deliberately EXCLUDES those same items from its "Needs
+    review" bucket (they are "Permitted, conditions to check" instead;
+    see count_buckets' own docstring and test_count_buckets_are_mutually_
+    exclusive_and_sum_to_item_total for why), and src/report/narrator.py's
+    prompt rule states the identical split for LLM narration ("a
+    permitted_with_conditions item belongs ONLY under 'What is permitted'
+    -- do NOT also list it under 'What needs review'"). A single "N
+    item(s) require manual review" sentence that quietly counted
+    permitted_with_conditions items too (Pepsimain, MEASURED: 7 items
+    called "require manual review" here, "Needs review" 0 in the count
+    strip -- narration normally hides this, since narrate() overwrites
+    this whole string, but the two are wrong to disagree even when
+    hidden) contradicted the strip it renders alongside on every run
+    where narration fell back to this function. Split below so both
+    describe the SAME item, with the SAME word, every time.
     """
     parts = [f"{len(items)} item(s) evaluated."]
     if blocking:
@@ -469,7 +488,29 @@ def _build_summary(
         )
 
     if review_required:
-        parts.append(f"{len(review_required)} item(s) require manual review (item_id {review_required}).")
+        # Split by headline, not by slicing review_required itself: a
+        # permitted_with_conditions item can never also be unresolved,
+        # category_unknown, or (by construction -- _is_category_conflict
+        # requires a _BLOCKING_VERDICTS headline) in category_conflict, so
+        # this partition is exact, not an approximation.
+        needs_review = [
+            item.item_id
+            for item in items
+            if item.item_id in review_required
+            and (item.headline in ("unresolved", "category_unknown") or item.item_id in category_conflict)
+        ]
+        conditions_to_check = [
+            item.item_id
+            for item in items
+            if item.item_id in review_required and item.headline == "permitted_with_conditions"
+        ]
+        if needs_review:
+            parts.append(f"{len(needs_review)} item(s) require manual review (item_id {needs_review}).")
+        if conditions_to_check:
+            parts.append(
+                f"{len(conditions_to_check)} item(s) are permitted subject to conditions that must be "
+                f"checked against the product, not a missing verdict (item_id {conditions_to_check})."
+            )
 
     # Checked on the underlying max_level_mg_kg field, not the
     # "permitted_with_limit" verdict label: 96% of eu_fip rows carry

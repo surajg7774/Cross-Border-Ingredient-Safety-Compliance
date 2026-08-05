@@ -9,6 +9,7 @@ from src.ui.components import (
     _group_note,
     _is_ancestor_code,
     _normalize_conditions,
+    _order_news_signals,
     _out_of_scope_reason,
     _period_of_application_note,
     _permitted_group_key,
@@ -546,3 +547,55 @@ def test_group_conditions_map_spans_items_regardless_of_category_or_component():
 def test_group_conditions_map_empty_when_no_item_carries_a_group_clause():
     item = {"by_category": [_candidate("5.2", "permitted_qs", conditions="only tuna")]}
     assert _group_conditions_map([item]) == {}
+
+
+# --------------------------------------------------------------------------- #
+# _order_news_signals
+# --------------------------------------------------------------------------- #
+def _news_signal(eu_id, category, published_date, **overrides):
+    base = {
+        "eu_canonical_id": eu_id,
+        "substance_name": f"Additive {eu_id}",
+        "category": category,
+        "quoted_span": "quote",
+        "source_url": "https://example.com",
+        "published_date": published_date,
+        "flags": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_order_news_signals_sorts_one_additives_signals_newest_first():
+    # MEASURED (Pepsimain, E950): a "regulatory_review" and a
+    # "safety_opinion" signal for the SAME additive rendered in whatever
+    # order find_news_signals returned them -- no cue for which was
+    # current. Newest published_date must come first.
+    older = _news_signal("950", "regulatory_review", "2024-01-01")
+    newer = _news_signal("950", "safety_opinion", "2026-08-01")
+    ordered = _order_news_signals([older, newer])
+    assert ordered == [newer, older]
+
+
+def test_order_news_signals_missing_date_sorts_last_within_its_additive():
+    dated = _news_signal("950", "safety_opinion", "2026-08-01")
+    undated = _news_signal("950", "regulatory_review", None)
+    ordered = _order_news_signals([undated, dated])
+    assert ordered == [dated, undated]
+
+
+def test_order_news_signals_keeps_different_additives_grouped_and_in_first_seen_order():
+    # Sorting is per-additive, not a single global sort by date -- an
+    # older signal for the FIRST additive seen must not be pushed after a
+    # newer signal for a different additive; each additive's own group
+    # stays contiguous.
+    e968_old = _news_signal("968", "regulatory_review", "2023-01-01")
+    e955_new = _news_signal("955", "safety_opinion", "2026-08-01")
+    e968_older = _news_signal("968", "safety_opinion", "2022-01-01")
+    ordered = _order_news_signals([e968_old, e955_new, e968_older])
+    assert [s["eu_canonical_id"] for s in ordered] == ["968", "968", "955"]
+    assert ordered[0] == e968_old and ordered[1] == e968_older  # newest-first WITHIN the 968 group
+
+
+def test_order_news_signals_empty_list_returns_empty():
+    assert _order_news_signals([]) == []
