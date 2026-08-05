@@ -844,11 +844,12 @@ of the 134 additives permitted via "Group I, Additives" in category 14.1.4,
 131 (98%) carry EXACTLY this same two-clause pair, verbatim. This is EU
 FIP's export format splitting one legal permission with multiple
 restriction clauses into multiple rows, not a data conflict and not an
-artifact of `_dedupe_rows`'s key being too narrow (whitespace/date
+artifact of `dedupe_rows`'s key being too narrow (private `_dedupe_rows`
+at the time this was written, made public since -- whitespace/date
 differences were the suspected cause; neither exists here -- the rows
 differ in real, substantive legal text).
 
-**Conclusion: `_dedupe_rows`'s key is correctly scoped and must NOT be
+**Conclusion: `dedupe_rows`'s key is correctly scoped and must NOT be
 widened** -- doing so would silently merge two textually-different,
 both-applicable legal conditions into one, which is a correctness
 regression, not a fix. `conflicting_rows` is technically firing as
@@ -860,7 +861,7 @@ dropping the OTHER clause's numeric detail from the displayed conditions
 text. That is a real, separate finding -- `_select_row` picks a
 REPRESENTATIVE row when it should arguably present or combine both -- but
 it is a `src/rules/engine.py` behaviour change outside this task's scope,
-not something to fix by touching `_dedupe_rows`'s key. Left unchanged, as
+not something to fix by touching `dedupe_rows`'s key. Left unchanged, as
 instructed.
 
 > **SUPERSEDED (2026-08-04).** The conclusion above -- that `_select_row`
@@ -1011,7 +1012,11 @@ records permissions at the LEAF category, so a retrieved PARENT code
 is inside 14) has no row of its own and always rendered "not permitted in
 this category": true, meaningless, and it falsely claimed a divergence
 that does not exist. Fixed in `src/ui/components.py`: a new
-`_is_ancestor_code` detects the relationship from the dotted codes alone
+`_is_ancestor_code` (as of the later results-screen simplification, this
+per-item verdict strip was removed from the screen entirely; the same
+function survives, independently duplicated, as `src/report/export.py`'s
+own `_is_ancestor_code`, the PDF's equivalent check) detects the
+relationship from the dotted codes alone
 (string prefix + dot boundary, no tree structure needed, since eu_fip
 codes are already flat "N.N.N..." strings). Candidates that are ancestors
 of the confirmed (or, if unconfirmed, rank-1) candidate are split out

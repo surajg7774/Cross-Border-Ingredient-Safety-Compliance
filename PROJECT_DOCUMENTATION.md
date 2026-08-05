@@ -522,7 +522,7 @@ right answer in the top three   0.82
 Not good enough to trust alone. Good enough to offer three options to a person —
 **but the person is not limited to those three.** The confirmation screen shows the
 top three as radio options, and underneath, inside a "Choose another category"
-expander, a searchable dropdown lists **all 155 EU food categories** (`app.py:938-941`).
+expander, a searchable dropdown lists **all 155 EU food categories** (`app.py`).
 
 **This override is not a nicety, it is load-bearing.** recall@3 = 0.82 means for
 18% of components the right category is not in the top three at all — it does not
@@ -652,6 +652,15 @@ An EFSA opinion is not law. There is a test asserting `affects_verdict is False`
 It also stops the substitute advisor recommending a replacement that is itself under
 review.
 
+**Not currently shown on the results screen.** This curated EFSA lane matched
+nothing on every label tried so far — the section only ever rendered an empty
+table or a "no signals" caption, never a real result — so it was removed from
+the screen (and from the narration model's input) entirely. It is still
+computed on every run and still reaches the JSON and PDF exports in full,
+unchanged; only its on-screen and narrated presence is gone. The two
+retrieval-backed news lanes described in the README (additive news, and
+India → EU route news) are a separate, unrelated source and remain on screen.
+
 ## Stage 6 — Narration and export
 
 The one place an AI model writes for a person. It receives the **finished** assessment
@@ -668,7 +677,10 @@ It is instructed to:
 **Then it is checked.** Every E-number, level and category code in the prose must appear
 in the data handed to it. Anything that does not is recorded in `unfaithful_claims`.
 
-If the model is unavailable, a fixed deterministic summary is shown instead.
+If the model is unavailable, the results screen shows nothing in its place —
+deliberately: a system failure is not something a reader should have to parse.
+The deterministic summary the rule engine already computed is never lost,
+though — it still reaches the JSON and PDF exports either way.
 
 ## The agent — for items nobody could identify
 
@@ -957,8 +969,11 @@ numbers**. **No E-numbers anywhere.** The entire system is built on E-numbers, a
 nothing available links the two. A search for "sucralose" returned 82 rows, all CAS
 substring collisions.
 
-**Fix.** Abandoned automated ingestion. Built a small hand-checked list instead, and
-documented that it is partial — on every screen, unconditionally.
+**Fix.** Abandoned automated ingestion. Built a small hand-checked list instead. Its
+partial-coverage caveat was originally shown on every screen, unconditionally; the
+lane itself matched nothing on every label tried since, so the section was removed
+from the results screen entirely (see Stage 5b, above) — the caveat now reaches the
+JSON and PDF exports instead, not the screen.
 
 **Lesson.** *"The data exists"* and *"the data is usable"* are different claims.
 

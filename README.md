@@ -41,11 +41,11 @@ Since food category is outcome-determining (Annex II permissions are
 category-dependent), a wrong category silently produces a wrong verdict.
 So the confirmation screen never restricts a reviewer to the three
 retrieved candidates: alongside the top-3 radio choice, it offers a
-searchable dropdown over **all 155 EU food categories**
-(`app.py:938-941`). That override matters concretely — at recall@3 = 0.82,
-18% of components have the correct category outside the top-3 entirely, so
-without it those components could never be confirmed correctly no matter
-what the reviewer picked.
+searchable dropdown over **all 155 EU food categories** (the "Choose
+another category" expander, `app.py`). That override matters concretely —
+at recall@3 = 0.82, 18% of components have the correct category outside
+the top-3 entirely, so without it those components could never be
+confirmed correctly no matter what the reviewer picked.
 
 ## The six stages
 
@@ -95,6 +95,31 @@ identical extraction on every label where it engaged, and on one label
 skipping the crop returned 25 items including all 6 additive codes. No
 measured recall gain, one measured total failure — hence off by default
 (`run_extraction(..., crop=False)`; `scripts/extract.py --crop` to enable).
+
+### News lanes: retrieved, advisory, optional
+
+On top of the curated EFSA signal set (stage 5 above), two retrieval-backed
+news lanes run via [Tavily](https://tavily.com/) search
+(`src/horizon/search.py`, `src/horizon/news.py`): **additive news** (recent
+coverage of one specific additive) and **route news** (India → EU
+import/trade news for the product's confirmed food category, never about
+one specific additive).
+
+Both are advisory only: `NewsSignal.affects_verdict` and
+`RouteNewsSignal.affects_verdict` are hardcoded `False` — neither lane can
+change the compliance verdict, which stays the deterministic Annex II
+lookup from stage 4 regardless of what either lane finds.
+
+The model never composes a sentence for either lane. `classify_and_quote`
+picks a category from a fixed set and extracts a verbatim excerpt, checked
+to be a real substring of the retrieved source and rejected otherwise; the
+sentence a reader actually sees is built from a fixed per-category
+template plus that verified quote — never model-generated prose.
+
+Powered by `TAVILY_API_KEY` (optional; free tier, 1,000 credits/month, no
+card required — see `.env.example`). Without it, `get_search_provider()`
+returns `None` and both lanes degrade to empty results — everything else
+in the app works unaffected.
 
 ## Quickstart
 

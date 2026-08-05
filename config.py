@@ -69,17 +69,18 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     SMTP_FROM: str | None = None
 
-    # Optional: the (not-yet-wired) horizon news lane's Tavily API key --
+    # Optional: the horizon news lanes' (additive + route) Tavily API key --
     # see src/horizon/search.py's module docstring for the provider
-    # decision and for what "not wired" means. Declared here only so
-    # Settings() does not fail to construct when this is present in
-    # .env -- BaseSettings' default extra="forbid" would otherwise reject
-    # any key it doesn't recognise. Nothing reads settings.TAVILY_API_KEY
-    # yet: TavilySearchProvider still takes its key as a plain constructor
-    # argument (see src/report/email.py's send_report for why -- testable
-    # without an environment), not by reading this directly. A
-    # get_search_provider()-style factory that DOES read it is later-stage
-    # work, not this one.
+    # decision. WIRED: src/horizon/search.py's get_search_provider() reads
+    # this directly and is called once, in src/graph/pipeline.py, to build
+    # the search provider both lanes share. Absent or empty,
+    # get_search_provider() returns None -- not a fixture, not a silent
+    # no-op -- and both news lanes degrade to empty results; nothing else
+    # in the app is affected. TavilySearchProvider itself still takes its
+    # key as a plain constructor argument (see src/report/email.py's
+    # send_report for why -- testable without an environment), not by
+    # reading settings itself; get_search_provider() is the one place that
+    # bridges the two.
     TAVILY_API_KEY: str | None = None
 
 
