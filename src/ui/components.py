@@ -83,14 +83,6 @@ _OUT_OF_SCOPE_REASONS: dict[str, str] = {
     "not an additive": "an ordinary food",
 }
 
-# Internal flag name -> the plain phrase shown in the substitutes table.
-# The raw flag is untouched in the JSON export -- only display changes.
-_SUBSTITUTE_FLAG_LABELS: dict[str, str] = {
-    "classes_from_subtypes": "function inferred from sub-types",
-    "adds_labelling_obligation": "requires a warning label",
-    "under_efsa_review": "under EFSA review",
-}
-
 # eu_fip records permissions at the LEAF food category, so a retrieved
 # parent code (e.g. "14.1" or "14" alongside a confirmed "14.1.4") has no
 # row of its own and would always render "not permitted in this category"
@@ -117,9 +109,18 @@ _CATEGORY_CITATION_RE = re.compile(
 
 
 def _short_category_name(name: str | None) -> str | None:
+    """DISPLAY ONLY -- category_name itself, and every JSON/CSV/PDF
+    export, keep the raw value untouched. Beyond stripping the citation
+    clause, this also strips leading/trailing whitespace (5 of 155
+    food_categories.json names carry it) and swaps underscores for spaces
+    (2 of 155 are stored as slugs, e.g. "Flavoured_drinks") -- see
+    app.py's _display_category_name for the category-confirmation-screen
+    equivalent of this same cleanup, and its docstring for the measured
+    numbers."""
     if not name:
         return None
-    return _CATEGORY_CITATION_RE.sub("", name).strip()
+    cleaned = _CATEGORY_CITATION_RE.sub("", name).strip().replace("_", " ")
+    return cleaned[:1].upper() + cleaned[1:] if cleaned else cleaned
 
 
 def _category_display(fcs_code: str | None, category_name: str | None) -> str:
@@ -195,10 +196,6 @@ def _out_of_scope_reason(item: dict) -> str:
             governing = flag.split(":", 1)[1].strip()
             return _OUT_OF_SCOPE_REASONS.get(governing, governing)
     return "an ordinary food"
-
-
-def _substitute_flag_label(flag: str) -> str:
-    return _SUBSTITUTE_FLAG_LABELS.get(flag, flag)
 
 
 # Ambiguous-name candidates (src.resolve.schemas.ResolvedItem.candidates,
@@ -478,9 +475,42 @@ def render_review_queue(
         st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
 
 
+def _group_candidates_by_conditions(candidates: list[dict]) -> list[tuple[str | None, list[dict]]]:
+    """`candidates` grouped by BYTE-IDENTICAL `conditions` text, first-
+    appearance order preserved -- MEASURED: a blocked item's substitute
+    candidates routinely include several members of the same eu_fip Group
+    provision (e.g. Group II colours), which used to mean the exact same
+    conditions paragraph rendered once per candidate (five identical
+    expanders for five candidates). A candidate with no conditions at all
+    is never merged with another candidate that also lacks one -- both
+    being absent is not the same claim as both being identical -- so each
+    gets its own singleton group, keyed None."""
+    groups: list[tuple[str | None, list[dict]]] = []
+    index_by_conditions: dict[str, int] = {}
+    for c in candidates:
+        conditions = c.get("conditions")
+        if not conditions:
+            groups.append((None, [c]))
+            continue
+        if conditions in index_by_conditions:
+            groups[index_by_conditions[conditions]][1].append(c)
+            continue
+        index_by_conditions[conditions] = len(groups)
+        groups.append((conditions, [c]))
+    return groups
+
+
 def render_substitutes(result: dict) -> None:
     """Substitute candidates for every blocked item. Renders nothing when
-    there are no suggestions -- the common case when nothing is blocked."""
+    there are no suggestions -- the common case when nothing is blocked.
+
+    `result["warnings"]` (additives excluded because their technological
+    function is not recorded in the Codex INS list) and each candidate's
+    `flags` are internal bookkeeping -- never rendered here, kept in full
+    in the JSON/CSV/PDF exports (SubstituteResult.model_dump() carries
+    both; src/report/export.py has its own independent flag-label mapping
+    for the PDF, per this module's own DESIGN RULE against importing
+    export.py's)."""
     suggestions = result.get("suggestions") or []
     if not suggestions:
         return
@@ -505,7 +535,6 @@ def render_substitutes(result: dict) -> None:
             # Same Maximum-amount wording as the additives table -- never
             # "quantum satis" as a bare term (see _max_amount_cell).
             level = _max_amount_cell(c["verdict"], c.get("max_level_mg_kg"))
-            flags_display = ", ".join(_substitute_flag_label(f) for f in c.get("flags") or []) or "—"
             rows.append(
                 "<tr>"
                 f"<td class='eu-code'>E{_esc(c['eu_canonical_id'])}</td>"
@@ -513,51 +542,48 @@ def render_substitutes(result: dict) -> None:
                 f"<td>{_esc(', '.join(c.get('shared_functional_classes') or []))}</td>"
                 f"<td>{_esc(_status_label(c['verdict'], c.get('max_level_mg_kg'))[0])}</td>"
                 f"<td class='eu-code'>{_esc(level)}</td>"
-                f"<td>{_esc(flags_display)}</td>"
                 "</tr>"
             )
         table = (
             "<table class='eu-table'><thead><tr>"
             "<th>EU id</th><th>Name</th><th>Shared functional class</th>"
-            "<th>Status</th><th>Maximum amount</th><th>Flags</th>"
+            "<th>Status</th><th>Maximum amount</th>"
             "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
         )
         st.markdown(table, unsafe_allow_html=True)
 
         # Per-candidate conditions/source -- previously invisible entirely.
-        # One expander per candidate that actually has something to show.
-        for c in candidates:
-            if not c.get("conditions") and not c.get("source_url"):
-                continue
-            label = c.get("additive_name") or f"E{c.get('eu_canonical_id')}"
-            with st.expander(f"Conditions — {label}"):
-                for note in _conditions_notes(c.get("conditions")):
-                    st.caption(note)
-                if c.get("conditions"):
-                    st.write(c["conditions"])
-                if c.get("source_url"):
-                    st.markdown(
-                        f"<a href='{_esc(c['source_url'])}' target='_blank'>Source</a>",
-                        unsafe_allow_html=True,
-                    )
+        # One expander per GROUP of candidates that share identical
+        # conditions text (see _group_candidates_by_conditions), not one
+        # per candidate -- a byte-identical Group provision repeated once
+        # per member is not five separate findings.
+        notable = [c for c in candidates if c.get("conditions") or c.get("source_url")]
+        for conditions, members in _group_candidates_by_conditions(notable):
+            names = [c.get("additive_name") or f"E{c.get('eu_canonical_id')}" for c in members]
+            label = f"Conditions — {names[0]}" if len(members) == 1 else f"Conditions — shared by {', '.join(names)}"
+            with st.expander(label):
+                if conditions:
+                    for note in _conditions_notes(conditions):
+                        st.caption(note)
+                    st.write(conditions)
+                source_urls = {c.get("source_url") for c in members}
+                if len(source_urls) == 1:
+                    url = next(iter(source_urls))
+                    if url:
+                        st.markdown(f"<a href='{_esc(url)}' target='_blank'>Source</a>", unsafe_allow_html=True)
+                    else:
+                        st.caption("No source URL on this record.")
                 else:
-                    st.caption("No source URL on this record.")
+                    for c, member_name in zip(members, names):
+                        if c.get("source_url"):
+                            st.markdown(
+                                f"<a href='{_esc(c['source_url'])}' target='_blank'>{_esc(member_name)} — Source</a>",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.caption(f"{member_name}: no source URL on this record.")
 
         st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
-
-    warnings = result.get("warnings") or []
-    if warnings:
-        # Developer-diagnostic lines ("X excluded -- functional class
-        # unknown") read as noise inline; collapsed, with the reason
-        # spelled out once instead of repeated per line.
-        label = f"{len(warnings)} additive{'s' if len(warnings) != 1 else ''} could not be assessed as substitutes"
-        with st.expander(label):
-            st.caption(
-                "Their technological function is not recorded in the Codex INS list, so we "
-                "cannot confirm they serve the same purpose as the blocked additive."
-            )
-            for warning in warnings:
-                st.caption(warning)
 
 
 _NEWS_CATEGORY_LABELS = {

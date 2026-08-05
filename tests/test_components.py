@@ -6,6 +6,7 @@ from src.ui.components import (
     _blocking_reason,
     _conditions_notes,
     _display_name,
+    _group_candidates_by_conditions,
     _group_note,
     _max_amount_cell,
     _order_news_signals,
@@ -15,7 +16,6 @@ from src.ui.components import (
     _shared_family_word,
     _short_category_name,
     _status_label,
-    _substitute_flag_label,
     candidates_phrase,
     count_buckets,
 )
@@ -170,12 +170,49 @@ def test_candidates_phrase_empty_for_no_candidates():
     assert candidates_phrase([], {}) == ""
 
 
-def test_substitute_flag_label_translates_known_flags_and_passes_through_unknown():
-    assert _substitute_flag_label("classes_from_subtypes") == "function inferred from sub-types"
-    assert _substitute_flag_label("adds_labelling_obligation") == "requires a warning label"
-    assert _substitute_flag_label("under_efsa_review") == "under EFSA review"
-    assert _substitute_flag_label("some_future_flag") == "some_future_flag"
+def _substitute_candidate(eu_canonical_id, **overrides):
+    base = {
+        "eu_canonical_id": eu_canonical_id,
+        "additive_name": f"Additive {eu_canonical_id}",
+        "verdict": "permitted_qs",
+        "max_level_mg_kg": None,
+        "conditions": None,
+        "source_url": None,
+        "shared_functional_classes": [],
+        "flags": [],
+    }
+    base.update(overrides)
+    return base
 
+
+def test_group_candidates_by_conditions_merges_byte_identical_text():
+    # MEASURED case: five Group II colour candidates carrying the exact
+    # same conditions paragraph -- must collapse to ONE group, not five.
+    shared = "Permitted via Group II, Colours; quantum satis."
+    candidates = [_substitute_candidate(str(i), conditions=shared) for i in (100, 101, 102, 103, 104)]
+    groups = _group_candidates_by_conditions(candidates)
+    assert len(groups) == 1
+    conditions, members = groups[0]
+    assert conditions == shared
+    assert len(members) == 5
+
+
+def test_group_candidates_by_conditions_keeps_genuinely_different_text_separate():
+    candidates = [
+        _substitute_candidate("100", conditions="Permitted via Group II, Colours; quantum satis."),
+        _substitute_candidate("160a", conditions="Permitted subject to a maximum of 100 mg/kg."),
+    ]
+    groups = _group_candidates_by_conditions(candidates)
+    assert len(groups) == 2
+
+
+def test_group_candidates_by_conditions_never_merges_two_absent_conditions():
+    # Both lacking conditions is not the same claim as both being
+    # identical -- each gets its own singleton group.
+    candidates = [_substitute_candidate("100"), _substitute_candidate("101")]
+    groups = _group_candidates_by_conditions(candidates)
+    assert len(groups) == 2
+    assert all(conditions is None for conditions, _members in groups)
 
 
 def test_group_note_derives_group_name_from_conditions_text():

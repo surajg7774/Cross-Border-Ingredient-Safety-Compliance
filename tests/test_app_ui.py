@@ -564,3 +564,134 @@ def test_rejected_real_proposal_keeps_ask_again_button():
     at = AppTest.from_string(_review_proposal_script(_ACCEPTABLE_PROPOSAL, "rejected")).run()
     assert not at.exception
     assert "Ask again" in [b.label for b in at.button]
+
+
+# ---- Substitutes (src/ui/components.py's render_substitutes) ------------
+
+
+def _substitute_candidate(eu_canonical_id, **overrides):
+    base = {
+        "eu_canonical_id": eu_canonical_id,
+        "additive_name": f"Additive {eu_canonical_id}",
+        "verdict": "permitted_qs",
+        "max_level_mg_kg": None,
+        "conditions": None,
+        "source_url": None,
+        "shared_functional_classes": ["Colour"],
+        "flags": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def _render_substitutes_script(result: dict) -> str:
+    return f"""
+from src.ui import components
+
+components.render_substitutes({result!r})
+"""
+
+
+def test_substitutes_table_has_no_flags_column():
+    # TASK: internal vocabulary ("multiple_provisions_apply: 2, function
+    # inferred from sub-types") does not belong in the UI table -- flags
+    # stay in the JSON/CSV/PDF exports only.
+    result = {
+        "suggestions": [
+            {
+                "item_id": 1,
+                "blocked_eu_canonical_id": "999",
+                "blocked_name": "Blocked additive",
+                "blocked_reason": "not_authorised_eu",
+                "fcs_code": "12.2.2",
+                "candidates": [
+                    _substitute_candidate("100", flags=["classes_from_subtypes", "under_efsa_review"]),
+                ],
+                "no_candidates_reason": None,
+            }
+        ],
+        "warnings": [],
+    }
+    at = AppTest.from_string(_render_substitutes_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "<th>Flags</th>" not in markdown_html
+    assert "classes_from_subtypes" not in markdown_html
+    assert "function inferred from sub-types" not in markdown_html
+
+
+def test_substitutes_identical_conditions_render_once_not_per_candidate():
+    # TASK: five candidates carrying byte-identical Group II conditions
+    # text must produce ONE expander for the whole block, not five.
+    shared = "Permitted via Group II, Colours; quantum satis."
+    result = {
+        "suggestions": [
+            {
+                "item_id": 1,
+                "blocked_eu_canonical_id": "999",
+                "blocked_name": "Blocked additive",
+                "blocked_reason": "not_authorised_eu",
+                "fcs_code": "12.2.2",
+                "candidates": [
+                    _substitute_candidate(str(code), conditions=shared) for code in (100, 101, 102, 103, 104)
+                ],
+                "no_candidates_reason": None,
+            }
+        ],
+        "warnings": [],
+    }
+    at = AppTest.from_string(_render_substitutes_script(result)).run()
+    assert not at.exception
+    assert len(at.expander) == 1
+    assert "shared by" in at.expander[0].label
+
+
+def test_substitutes_genuinely_different_conditions_render_separately():
+    result = {
+        "suggestions": [
+            {
+                "item_id": 1,
+                "blocked_eu_canonical_id": "999",
+                "blocked_name": "Blocked additive",
+                "blocked_reason": "not_authorised_eu",
+                "fcs_code": "12.2.2",
+                "candidates": [
+                    _substitute_candidate("100", conditions="Permitted via Group II, Colours; quantum satis."),
+                    _substitute_candidate("160a", conditions="Permitted subject to a maximum of 100 mg/kg."),
+                ],
+                "no_candidates_reason": None,
+            }
+        ],
+        "warnings": [],
+    }
+    at = AppTest.from_string(_render_substitutes_script(result)).run()
+    assert not at.exception
+    assert len(at.expander) == 2
+
+
+def test_substitutes_uncovered_warning_is_not_shown_on_screen():
+    # TASK: "N additives could not be assessed as substitutes" is internal
+    # codex_ins-coverage bookkeeping -- removed from the screen, kept in
+    # the JSON export (SubstituteResult.warnings, untouched).
+    result = {
+        "suggestions": [
+            {
+                "item_id": 1,
+                "blocked_eu_canonical_id": "999",
+                "blocked_name": "Blocked additive",
+                "blocked_reason": "not_authorised_eu",
+                "fcs_code": "12.2.2",
+                "candidates": [_substitute_candidate("100")],
+                "no_candidates_reason": None,
+            }
+        ],
+        "warnings": ["E123 excluded -- functional class unknown"],
+    }
+    at = AppTest.from_string(_render_substitutes_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    captions = [c.value for c in at.caption]
+    assert "could not be assessed as substitutes" not in markdown_html
+    assert not any("could not be assessed as substitutes" in c for c in captions)
+    assert not any("E123 excluded" in c for c in captions)
+    assert [e.label for e in at.expander] == []

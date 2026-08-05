@@ -46,13 +46,17 @@ def test_short_description_truncates_a_long_first_sentence_at_a_word_boundary():
 
 
 def test_candidate_option_label_includes_short_description_when_present():
+    # "entire fresh fruit and vegetables" is 4.1.1's REAL name -- stored
+    # lowercase-first-letter in food_categories.json; _display_category_
+    # name's sentence-casing fixes this the same way it fixes the
+    # underscored-slug names.
     candidate = CategoryCandidate(code="4.1.1", name="entire fresh fruit and vegetables", similarity=0.63, permitted=True)
     categories = {"4.1.1": _category("4.1.1", "entire fresh fruit and vegetables", "Fruits and vegetables presented fresh from harvest.")}
     label = app._candidate_option_label(candidate, categories)
     # Code+name bolded (the only structure st.radio options can carry --
     # see the function's own docstring), description plain after it.
     assert label == (
-        "**4.1.1 — entire fresh fruit and vegetables** — "
+        "**4.1.1 — Entire fresh fruit and vegetables** — "
         "Fruits and vegetables presented fresh from harvest."
     )
 
@@ -78,6 +82,82 @@ def test_candidate_option_label_never_shows_a_similarity_score():
     label = app._candidate_option_label(candidate, categories)
     assert "score" not in label.lower()
     assert "0.63" not in label
+
+
+def test_display_category_name_strips_whitespace_that_breaks_bold_markdown():
+    # REGRESSION: 14.1.2's real name ends with a trailing space --
+    # CommonMark's flanking-delimiter rule means a closing "**" preceded
+    # by whitespace cannot close the emphasis run, so an un-stripped name
+    # rendered literal asterisks instead of bold text.
+    assert app._display_category_name("Fruit juices and vegetable juices ") == "Fruit juices and vegetable juices"
+    assert app._display_category_name(" flours ") == "Flours"
+
+
+def test_display_category_name_replaces_underscores_and_capitalizes_first_letter():
+    # MEASURED: 2 of 155 food_categories.json names are stored as slugs.
+    assert app._display_category_name("non-alcoholic_beverages") == "Non-alcoholic beverages"
+    assert app._display_category_name("Flavoured_drinks") == "Flavoured drinks"
+
+
+def test_candidate_option_label_strips_trailing_whitespace_before_bolding():
+    # REGRESSION: the real 14.1.2 candidate this bug was reported against.
+    candidate = CategoryCandidate(
+        code="14.1.2",
+        name="Fruit juices as defined by Directive 2001/112/EC and vegetable juices ",
+        similarity=0.63,
+        permitted=True,
+    )
+    categories = {"14.1.2": _category("14.1.2", candidate.name, None)}
+    label = app._candidate_option_label(candidate, categories)
+    assert label.count("**") == 2  # one opening, one closing pair -- never four literal asterisks
+    assert label == "**14.1.2 — Fruit juices as defined by Directive 2001/112/EC and vegetable juices**"
+
+
+def test_category_summary_shows_display_cleaned_names_not_raw_underscored_ones():
+    # TASK: the results header must not show "Flavoured_drinks" -- only
+    # the display string changes; category_name itself stays untouched.
+    from src.rules.schemas import CategoryVerdict, ItemVerdict, ProductVerdict
+
+    verdict = ProductVerdict(
+        items=[
+            ItemVerdict(
+                item_id=1,
+                eu_canonical_id="500",
+                additive_name="Test additive",
+                component_label=None,
+                by_category=[
+                    CategoryVerdict(
+                        fcs_code="14.1.4",
+                        category_name="Flavoured_drinks",
+                        rank=1,
+                        verdict="permitted_qs",
+                        max_level_mg_kg=None,
+                        max_level_basis="gmp",
+                        conditions=None,
+                        note_codes=[],
+                        source_url=None,
+                        retrieved_date=None,
+                    )
+                ],
+                headline="permitted_qs",
+                category_sensitive=False,
+                verdict_certainty="certain",
+                flags=[],
+            )
+        ],
+        blocking=[],
+        category_conflict=[],
+        review_required=[],
+        category_sensitive_items=[],
+        summary="1 item(s) evaluated.",
+        category_used={"(product)": "14.1.4"},
+        category_source={"(product)": "user"},
+        warnings=[],
+        data_version="test",
+    )
+    summary = app._category_summary(verdict)
+    assert summary == "Product: 14.1.4 (Flavoured drinks)"
+    assert verdict.items[0].by_category[0].category_name == "Flavoured_drinks"  # untouched
 
 
 def _proposal(classification, confidence, ins=None, **overrides):

@@ -498,11 +498,15 @@ def _save_upload(uploaded) -> Path:
 
 
 def _category_summary(verdict: ProductVerdict) -> str:
-    """"Product: 14.1.4 (Flavoured_drinks); Seasoning: 12.1.2 (Seasonings and
-    condiments)" -- the confirmed food category(ies), for the product
+    """"Product: 14.1.4 (Flavoured drinks); Seasoning: 12.1.2 (Seasonings
+    and condiments)" -- the confirmed food category(ies), for the product
     identity block. Category names are pulled from the verdict's own
     CategoryVerdict rows (every one already carries category_name); this
-    never re-derives them from the food-category corpus."""
+    never re-derives them from the food-category corpus. Names are
+    display-cleaned (_display_category_name -- REGRESSION this fixes: two
+    of 155 food_categories.json names are stored as underscored slugs,
+    e.g. "Flavoured_drinks") -- category_name itself, and everything
+    derived from it upstream, is untouched."""
     names: dict[str, str | None] = {}
     for item in verdict.items:
         for cv in item.by_category:
@@ -512,7 +516,8 @@ def _category_summary(verdict: ProductVerdict) -> str:
     for key, code in verdict.category_used.items():
         label = "Product" if key == "(product)" else key
         name = names.get(code)
-        parts.append(f"{label}: {code} ({name})" if name else f"{label}: {code}")
+        display_name = _display_category_name(name) if name else None
+        parts.append(f"{label}: {code} ({display_name})" if display_name else f"{label}: {code}")
     return "; ".join(parts) if parts else "not confirmed"
 
 
@@ -892,6 +897,31 @@ def _short_description(description: str | None) -> str | None:
     return sentence[:_DESCRIPTION_DISPLAY_LIMIT].rsplit(" ", 1)[0] + "…"
 
 
+def _display_category_name(name: str) -> str:
+    """A food-category name, cleaned up for DISPLAY ONLY -- never touches
+    the underlying data (food_categories.json, and every JSON/CSV/PDF
+    export, all keep the raw value; see components._short_category_name
+    for the results-screen equivalent of this same cleanup). Two
+    independent MEASURED issues in food_categories.json:
+
+    - Leading/trailing whitespace on 5 of 155 names (14.1.1, 14.1.2,
+      6.2.1, 8.3.2, 13.1.5.2) -- REGRESSION this fixes: CommonMark's
+      flanking-delimiter rule means a closing "**" preceded by whitespace
+      cannot close an emphasis run, so wrapping an un-stripped name in
+      "**...**" (_candidate_option_label, the "What was searched"
+      expander) rendered literal asterisks instead of bold text.
+    - Underscores instead of spaces on 2 of 155 names
+      ("non-alcoholic_beverages", "Flavoured_drinks") -- some category
+      rows were entered as slugs rather than real prose.
+
+    strip() fixes the first; underscore replacement plus capitalizing
+    only the first letter (never lower-casing the rest -- category names
+    legitimately contain acronyms like "EC" and proper nouns) fixes the
+    second."""
+    cleaned = name.strip().replace("_", " ")
+    return cleaned[:1].upper() + cleaned[1:] if cleaned else cleaned
+
+
 def _candidate_option_label(candidate: CategoryCandidate, categories: dict) -> str:
     """"**{code} — {name}** — {short description}" for a radio option, or
     just "**{code} — {name}**" when this category has no usable
@@ -906,7 +936,7 @@ def _candidate_option_label(candidate: CategoryCandidate, categories: dict) -> s
     still reads as its own block). Deliberately carries no similarity
     score -- see render_category_confirmation's "What was searched"
     expander for where that moved."""
-    base = f"**{candidate.code} — {candidate.name}**"
+    base = f"**{candidate.code} — {_display_category_name(candidate.name)}**"
     short = _short_description(categories[candidate.code].description)
     return f"{base} — {short}" if short else base
 
@@ -934,7 +964,7 @@ def render_category_confirmation() -> None:
     category_results: list[CategoryResult] = st.session_state.category_results
     categories, _score_query = _load_category_scorer()
     all_options = ["(keep the selection above)"] + [
-        f"{code} — {categories[code].name}" for code in sorted(categories, key=_code_sort_key)
+        f"{code} — {_display_category_name(categories[code].name)}" for code in sorted(categories, key=_code_sort_key)
     ]
 
     choices: dict[str | None, CategoryCandidate] = {}
@@ -961,7 +991,7 @@ def render_category_confirmation() -> None:
         with st.expander("What was searched"):
             st.caption(f"Query: {result.query.text}")
             for c in result.top3:
-                st.markdown(f"**{c.code} — {c.name}** (similarity {c.similarity:.2f})")
+                st.markdown(f"**{c.code} — {_display_category_name(c.name)}** (similarity {c.similarity:.2f})")
                 full_description = categories[c.code].description
                 if full_description:
                     st.caption(full_description)
