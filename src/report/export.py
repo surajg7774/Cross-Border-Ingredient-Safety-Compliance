@@ -14,12 +14,20 @@
 
 THE PDF IS THE ARTIFACT THAT GETS FORWARDED. Once it leaves this app it
 travels alone -- nobody re-opens the UI to check what it left out. A PDF
-that drops a caveat the screen carries (an unconfirmed category, a missing
-source, the dosage warning, the horizon lane's partial-coverage notice, an
-unverified DOI, an unfaithful narration claim) is worse than no PDF at all,
-because it reads as complete when it isn't. Every caveat rendered on the
-results screen (src/ui/components.py) MUST also appear here -- if you add a
-caveat to one, add it to the other.
+that drops a caveat (an unconfirmed category, a missing source, the dosage
+warning, category divergence, the horizon lane's partial-coverage notice,
+an unverified DOI, an unfaithful narration claim) is worse than no PDF at
+all, because it reads as complete when it isn't.
+
+NOT defined relative to the results screen (src/ui/components.py)
+anymore: the screen was deliberately stripped down to metric cards, the
+additives table, and collapsed out-of-scope -- it shows LESS than this
+module does, on purpose (a compliance officer defending a decision
+downloads the report; they do not scroll a live page for it). This
+module's job is to be a COMPLETE, STANDALONE record of what evaluate()/
+find_substitutes()/find_horizon_signals()/narrate() actually decided --
+judged against those objects directly, never against what currently
+happens to be on screen.
 """
 
 import csv
@@ -255,12 +263,51 @@ def _verdict_colour(verdict: str) -> colors.Color:
     return _MUTED
 
 
+def _is_ancestor_code(candidate_code: str, of_code: str) -> bool:
+    """True if `candidate_code` is a dotted-code ancestor of `of_code` --
+    "14.1" is an ancestor of "14.1.4"; "14.1.4" is not an ancestor of
+    "14.1" (directional) nor of itself. Duplicated from what src/ui/
+    components.py used before the results-screen simplification removed
+    its own copy -- this module must not import the UI layer (see this
+    module's own DESIGN RULE), so the PDF needs its own."""
+    return candidate_code != of_code and of_code.startswith(candidate_code + ".")
+
+
+def _diverging_candidates(item: ItemVerdict) -> list:
+    """The category candidates this item's verdict GENUINELY depends on --
+    empty whenever every real (non-ancestor) candidate agrees, or there is
+    only one to begin with. item.by_category[0] (the same candidate
+    _item_flowables' own `top` uses -- the confirmed one when the item was
+    confirmed, since a confirmed item's by_category has exactly one entry
+    at that point; otherwise rank-1 from retrieval) is the reference
+    candidate; anything that is its ANCESTOR (Khusmain's real case:
+    retrieved candidates "14.1.4", "14.1", "14" -- the latter two are not
+    alternatives, they CONTAIN 14.1.4, and eu_fip has no row for a parent
+    code, so it would otherwise evaluate a meaningless "not permitted in
+    this category") is filtered out before any divergence check runs.
+    MUST see the same picture a screen reader of the (now removed) verdict
+    strip / per-row expander would have -- this is the ONE thing that
+    screen used to show that the results screen shows nowhere at all
+    anymore; the PDF is where it survives."""
+    if not item.by_category:
+        return []
+    reference_code = item.by_category[0].fcs_code
+    candidates = [cv for cv in item.by_category if not _is_ancestor_code(cv.fcs_code, reference_code)]
+    if len(candidates) <= 1 or len({cv.verdict for cv in candidates}) <= 1:
+        return []
+    return candidates
+
+
 def _item_flowables(item: ItemVerdict, styles: dict, *, is_blocking: bool = False) -> list:
     """Every caveat the results screen carries for one item: category +
     verdict, WHY it blocks (for blocking items), the in-force date
     (relabelled, not "retrieved"), a real source-URL link or an explicit
     "no source URL" note, an unconfirmed-category note where it applies,
-    and the conditions text in full (never truncated)."""
+    the conditions text in full (never truncated), and -- NOT shown on
+    the results screen at all since its simplification, see src/ui/
+    components.py's render_additives_table -- which OTHER category this
+    verdict would have been under, when candidates genuinely diverge
+    (_diverging_candidates)."""
     flowables = [Paragraph(f"{_display_name(item)}  (E{item.eu_canonical_id})" if item.eu_canonical_id else _display_name(item), styles["item_name"])]
     if item.component_label:
         flowables.append(Paragraph(f"in {item.component_label}", styles["caption"]))
@@ -287,6 +334,15 @@ def _item_flowables(item: ItemVerdict, styles: dict, *, is_blocking: bool = Fals
 
     if "category_unconfirmed" in item.flags:
         flowables.append(Paragraph("Category not confirmed by a person -- retrieved automatically.", styles["warning"]))
+
+    diverging = _diverging_candidates(item)
+    if diverging:
+        flowables.append(
+            Paragraph("This verdict depends on which part of the product it applies to:", styles["caption"])
+        )
+        for cv in diverging:
+            where = f"{cv.category_name} ({cv.fcs_code})" if cv.category_name else cv.fcs_code
+            flowables.append(Paragraph(f"{_verdict_label(cv.verdict)} in {where}.", styles["caption"]))
 
     if top.retrieved_date:
         flowables.append(Paragraph(f"In force since {top.retrieved_date}.", styles["caption"]))
@@ -445,16 +501,24 @@ def to_pdf(
     narration: Narration,
     identity: ReportIdentity | None = None,
 ) -> bytes:
-    """Render the full report as a PDF -- same sections, same order, and
-    critically the same CAVEATS as the results screen (src/ui/components.py):
-    the product identity block, source URL and in-force date on every
-    verdict, WHY a blocking verdict blocks, an unconfirmed-category note
-    where that applies, the dosage caveat (carried inside verdict.summary),
-    out-of-scope items with their reason, the horizon lane's
-    partial-coverage warning (before the reassurance, not after), any
-    unverified-DOI warning, and the narration's model_id plus any
-    unfaithful_claims. See the module docstring for why this list is not
-    optional.
+    """Render the full report as a PDF -- the product identity block,
+    source URL and in-force date on every verdict, WHY a blocking verdict
+    blocks, an unconfirmed-category note where that applies, which OTHER
+    category a verdict would have been under when candidates genuinely
+    diverge (_diverging_candidates), the dosage caveat (carried inside
+    verdict.summary), out-of-scope items with their reason, the horizon
+    lane's partial-coverage warning (before the reassurance, not after),
+    any unverified-DOI warning, and the narration's model_id plus any
+    unfaithful_claims.
+
+    NOT the same as the results screen (src/ui/components.py) any more --
+    the screen was deliberately stripped down to metric cards, the
+    additives table, and collapsed out-of-scope, with every per-additive
+    detail (conditions text, source, in-force date, category divergence)
+    removed from it entirely. This function is now the ONLY place that
+    detail is rendered at all -- see the module docstring: the PDF is the
+    artifact that gets forwarded, and a compliance officer defending a
+    decision downloads this, they do not scroll a live page for it.
     """
     styles = _styles()
     buffer = io.BytesIO()

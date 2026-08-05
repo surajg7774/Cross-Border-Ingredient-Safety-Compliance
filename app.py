@@ -1410,44 +1410,35 @@ def render_results() -> None:
             _reset_session()
             st.rerun()
 
-    # The narration -- prominent, above the item sections. Rendered via
-    # plain st.markdown (Streamlit's own markdown parser, safe by default,
-    # no unsafe_allow_html). There is deliberately no separate rendering of
-    # verdict.summary (src/rules/engine.py's own deterministic words) below
-    # this: the item counts it states are the count strip just below
-    # (render_count_strip), which category was used is the page header
-    # above (identity.category), its two caveats (dosage, category
-    # confirmation) are re-derived in CODE, not prose, just below the count
-    # strip (components.render_verdict_caveats -- never dependent on
-    # narration succeeding), and narrate() ITSELF falls back to
-    # verdict.summary verbatim, unmodified, as narration.summary on ANY
-    # model failure (see src/report/narrator.py's own docstring) -- so
-    # nothing verdict.summary said is ever lost, only no longer duplicated
-    # ON TOP of itself when narration succeeds. The caption below is what
-    # actually tells a reader which case (real narration vs. fallback)
-    # they are looking at.
-    st.markdown(narration.summary)
-    # narration.detail is topic -> list of short sentences (a JSON object,
-    # not a markdown string -- see src/report/narrator.py's Narration
-    # schema for the bug this fixes: a flat string field silently rendered
-    # a stringified Python dict when the model returned one anyway). Each
-    # topic gets its own bold sub-heading and its points as bullets.
-    for topic, points in narration.detail.items():
-        st.markdown(f"**{topic}**")
-        for point in points:
-            st.markdown(f"- {point}")
-    # LOAD-BEARING, small as it looks: model_id reads "unavailable" on the
-    # narrate() fallback above, "gemini-3.5-flash" (or whichever model ran)
-    # otherwise -- this caption is the ONLY visible signal distinguishing
-    # real narration from the deterministic fallback now that there is no
-    # separate verdict.summary box. A real regression was caught by this
-    # caption once already; do not remove it.
-    st.caption(f"Written by {narration.model_id} from the assessment above. It adds no facts.")
-    if narration.unfaithful_claims:
-        st.warning(
-            "The narration above contains claims NOT found in the underlying assessment: "
-            + "; ".join(narration.unfaithful_claims)
-        )
+    # The narration -- prominent, above the item sections -- ONLY when it
+    # actually succeeded (narration.model_id != "unavailable"). On failure,
+    # narrate() falls back to verdict.summary verbatim with model_id=
+    # "unavailable" (see src/report/narrator.py's own docstring) -- that
+    # fallback text, its "Note: Narration was unavailable" detail entry,
+    # and the "Written by unavailable" caption are DELIBERATELY never shown
+    # here: a system failure (a model call that could not complete) is not
+    # something a user should have to read about on the results screen.
+    # verdict.summary itself is never lost -- it is still in the JSON/PDF
+    # exports (verdict.model_dump() / to_pdf's own paragraph) regardless of
+    # whether it is shown here.
+    if narration.model_id != "unavailable":
+        st.markdown(narration.summary)
+        # narration.detail is topic -> list of short sentences (a JSON
+        # object, not a markdown string -- see src/report/narrator.py's
+        # Narration schema for the bug this fixes: a flat string field
+        # silently rendered a stringified Python dict when the model
+        # returned one anyway). Each topic gets its own bold sub-heading
+        # and its points as bullets.
+        for topic, points in narration.detail.items():
+            st.markdown(f"**{topic}**")
+            for point in points:
+                st.markdown(f"- {point}")
+        st.caption(f"Written by {narration.model_id} from the assessment above. It adds no facts.")
+        if narration.unfaithful_claims:
+            st.warning(
+                "The narration above contains claims NOT found in the underlying assessment: "
+                + "; ".join(narration.unfaithful_claims)
+            )
 
     item_dicts = [item.model_dump() for item in verdict.items]
     out_of_scope_items = [d for d in item_dicts if d["headline"] == "out_of_scope"]
@@ -1474,28 +1465,18 @@ def render_results() -> None:
     # legitimately appear in more than one place (e.g. verdict.blocking vs.
     # verdict.category_conflict) -- the strip must never double-count.
     components.render_count_strip(components.count_buckets(item_dicts))
-    # Deterministic, code-computed caveats (dosage, category confirmation) --
-    # see components._verdict_caveats for why these are not a narration
-    # prompt rule: unlike the narration above, this never reads narration
-    # at all, so it renders identically whether narration succeeded or
-    # narrate() fell back to verdict.summary.
-    components.render_verdict_caveats(item_dicts)
-
-    # Any Group clause (Group I, Group II, ...) shared by more than one
-    # item's primary candidate renders ONCE here, before the table, and
-    # every item that carries it -- whatever its Status -- links back to
-    # it instead of repeating it (see components.render_group_conditions_
-    # block for the measurement and the merged-clause case it deliberately
-    # leaves untouched).
-    all_items = blocking_items + conflict_items + permitted_items
-    group_registry = components.render_group_conditions_block(all_items)
 
     # ONE table, one row per additive, worst-first -- replaces the old
     # Blocking/Category-dependent/Permitted sections (see
     # components.render_additives_table's own docstring for why those
     # three headline-derived buckets collapse to a single Status column
-    # instead of three separately-labelled sections).
-    components.render_additives_table(all_items, names, group_registry=group_registry)
+    # instead of three separately-labelled sections). Per-additive detail
+    # (conditions text, source, in-force date, category divergence) is
+    # NOT rendered on screen at all -- see render_additives_table's own
+    # docstring -- it stays in the PDF/JSON exports only (src/report/
+    # export.py's _item_flowables / verdict.model_dump()).
+    all_items = blocking_items + conflict_items + permitted_items
+    components.render_additives_table(all_items, names)
 
     components.render_substitutes(substitute_result.model_dump())
     components.render_horizon(horizon_result.model_dump())

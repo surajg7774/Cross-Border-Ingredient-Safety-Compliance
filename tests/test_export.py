@@ -9,7 +9,11 @@ from src.horizon.schemas import HorizonResult, HorizonSignal
 from src.report.export import (
     ReportIdentity,
     _blocking_reason,
+    _diverging_candidates,
+    _is_ancestor_code,
+    _item_flowables,
     _out_of_scope_reason,
+    _styles,
     _substitute_flag_label,
     to_csv,
     to_json,
@@ -292,6 +296,117 @@ def test_substitute_flag_label_translates_known_flags_and_passes_through_unknown
     assert _substitute_flag_label("adds_labelling_obligation") == "requires a warning label"
     assert _substitute_flag_label("under_efsa_review") == "under EFSA review"
     assert _substitute_flag_label("some_future_flag") == "some_future_flag"
+
+
+def _cv(fcs_code, verdict, category_name=None, **overrides):
+    base = {
+        "fcs_code": fcs_code,
+        "category_name": category_name or f"Category {fcs_code}",
+        "rank": 1,
+        "verdict": verdict,
+        "max_level_mg_kg": None,
+        "max_level_basis": None,
+        "conditions": None,
+        "note_codes": [],
+        "source_url": None,
+        "retrieved_date": None,
+    }
+    base.update(overrides)
+    return CategoryVerdict(**base)
+
+
+def _item_with_candidates(*candidates, **overrides):
+    base = {
+        "item_id": 1,
+        "eu_canonical_id": "330",
+        "additive_name": "Citric acid",
+        "component_label": None,
+        "by_category": list(candidates),
+        "headline": candidates[0].verdict if candidates else "category_unknown",
+        "category_sensitive": len({cv.verdict for cv in candidates}) > 1,
+        "verdict_certainty": "certain",
+        "flags": [],
+    }
+    base.update(overrides)
+    return ItemVerdict(**base)
+
+
+# --------------------------------------------------------------------------- #
+# _is_ancestor_code / _diverging_candidates -- the PDF's own copy of the
+# logic src/ui/components.py used before the results-screen simplification
+# removed its per-additive expander entirely. This is now the ONLY place
+# category divergence is shown at all -- see _item_flowables' own docstring.
+# --------------------------------------------------------------------------- #
+def test_is_ancestor_code():
+    assert _is_ancestor_code("14.1", "14.1.4") is True
+    assert _is_ancestor_code("14", "14.1.4") is True
+    assert _is_ancestor_code("14.1.4", "14.1") is False  # directional
+    assert _is_ancestor_code("14.1.4", "14.1.4") is False  # not its own ancestor
+    assert _is_ancestor_code("14.2", "14.1.4") is False  # sibling branch, not ancestor
+    assert _is_ancestor_code("1", "14.1.4") is False  # prefix string, not a real dotted ancestor
+
+
+def test_diverging_candidates_khusmain_real_shape_ancestors_produce_no_divergence():
+    # THE REAL CASE: Khusmain's three retrieved candidates were 14.1.4,
+    # 14.1 and 14 -- not alternatives, 14.1.4 is INSIDE 14.1 is INSIDE 14.
+    # eu_fip has no row for the parents, so they would otherwise evaluate
+    # "not permitted in this category": true, meaningless, and it would
+    # falsely claim a divergence that does not exist.
+    item = _item_with_candidates(
+        _cv("14.1.4", "permitted_with_conditions", "Flavoured drinks"),
+        _cv("14.1", "not_permitted_in_category", "Non-alcoholic beverages"),
+        _cv("14", "not_permitted_in_category", "Beverages"),
+    )
+    assert _diverging_candidates(item) == []
+
+
+def test_diverging_candidates_genuine_divergence_between_non_ancestor_candidates():
+    # Regression guard: the ancestor fix must not suppress a REAL
+    # divergence between two candidates that are not in the same branch
+    # (Chipsmain's E551: permitted under 12.2.2, not under 15.1).
+    item = _item_with_candidates(
+        _cv("12.2.2", "permitted_with_conditions", "Seasonings"),
+        _cv("15.1", "not_permitted_in_category", "Savoury snacks"),
+    )
+    diverging = _diverging_candidates(item)
+    assert [cv.fcs_code for cv in diverging] == ["12.2.2", "15.1"]
+
+
+def test_diverging_candidates_empty_for_a_single_candidate():
+    item = _item_with_candidates(_cv("1.5", "permitted_qs"))
+    assert _diverging_candidates(item) == []
+
+
+def test_diverging_candidates_empty_when_all_candidates_agree():
+    item = _item_with_candidates(_cv("1.5", "permitted_qs"), _cv("7.2", "permitted_qs"))
+    assert _diverging_candidates(item) == []
+
+
+def test_diverging_candidates_empty_when_no_by_category():
+    item = _item_with_candidates(headline="category_unknown")
+    assert _diverging_candidates(item) == []
+
+
+def test_item_flowables_includes_divergence_text_when_candidates_diverge():
+    # Pepsimain's real measured case: E150d permitted in 14.1.4, blocked
+    # in 14.1.5.1 -- item_flowables must actually SURFACE the divergence
+    # _diverging_candidates finds, not just compute it.
+    item = _item_with_candidates(
+        _cv("14.1.4", "permitted_with_conditions", "Flavoured drinks"),
+        _cv("14.1.5.1", "not_permitted_in_category", "coffee coffee extracts"),
+    )
+    flowables = _item_flowables(item, _styles())
+    text = " ".join(f.text for f in flowables if hasattr(f, "text"))
+    assert "depends on which part of the product" in text
+    assert "coffee coffee extracts" in text
+    assert "14.1.5.1" in text
+
+
+def test_item_flowables_omits_divergence_text_when_candidates_agree():
+    item = _item_with_candidates(_cv("14.1.4", "permitted_qs", "Flavoured drinks"))
+    flowables = _item_flowables(item, _styles())
+    text = " ".join(f.text for f in flowables if hasattr(f, "text"))
+    assert "depends on which part of the product" not in text
 
 
 def test_to_pdf_produces_valid_pdf_bytes():

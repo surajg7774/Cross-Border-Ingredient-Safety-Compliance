@@ -101,71 +101,6 @@ _SUBSTITUTE_FLAG_LABELS: dict[str, str] = {
 _GROUP_CONDITIONS_RE = re.compile(r"^(?:\d+\)\s*)?Permitted via (Group [IVX]+(?:,\s*[A-Za-z]+)?)")
 _PERIOD_OF_APPLICATION_RE = re.compile(r"period of application", re.IGNORECASE)
 
-# src/rules/row_selection.py's merge_conditions numbers EVERY clause
-# ("1) ...\n\n2) ...") only when 2+ DISTINCT co-applicable rows are merged;
-# a single clause, merged or not, is never numbered. A second numbered
-# clause after a paragraph break therefore means this conditions string
-# carries more than the Group permission alone (MEASURED, real examples in
-# data/outputs/verdict/: GraphTestChips.json's E627/E631 are "1) Permitted
-# via Group I...\n\n2) Permitted via Ribonucleotides" -- collapsing that to
-# a bare Group I reference would silently drop the Ribonucleotides clause).
-_MERGED_CLAUSE_MARKER_RE = re.compile(r"\n\s*\n\s*\d+\)\s")
-
-# Splits a merge_conditions() string BEFORE each numbered marker (the
-# marker itself, "2) ", "3) ", ... stays with the clause it introduces, so
-# each split piece is still individually parseable by _LEADING_CLAUSE_
-# NUMBER_RE below). This is the ONLY boundary _split_merged_clauses treats
-# as confident -- it is produced by code (row_selection.merge_conditions),
-# not by wherever eu_fip's own free-text newlines happen to fall.
-_MERGED_CLAUSE_SPLIT_RE = re.compile(r"\n\s*\n\s*(?=\d+\)\s)")
-_LEADING_CLAUSE_NUMBER_RE = re.compile(r"^\d+\)\s*")
-
-
-def _split_merged_clauses(conditions: str) -> list[str] | None:
-    """The individual clauses of a merged multi-clause conditions string,
-    each with its own leading "N) " marker stripped -- or None if
-    `conditions` does not have that shape at all. merge_conditions()
-    numbers a clause ONLY when 2+ distinct co-applicable rows were merged
-    (src/rules/row_selection.py); a single clause, however it wraps, is
-    NEVER numbered -- so None here also correctly means "this is one
-    clause", not "detection failed".
-
-    MEASURED (see _render_conditions_body): eu_fip conditions text is
-    riddled with mid-clause newlines that are NOT clause boundaries --
-    of 1194 distinct conditions strings in data/reference/eu_fip.json,
-    only 96 (8.0%) contain a first_sentence()-style sentence boundary at
-    all, and even those routinely fall mid-clause (a period inside a
-    Regulation citation, not a real full stop) -- so a raw "\\n" or a
-    sentence-boundary regex is never trusted here. The "N) " marker
-    inserted by merge_conditions is the only boundary this project
-    controls the placement of, so it is the only one treated as
-    confident."""
-    if not _MERGED_CLAUSE_MARKER_RE.search(conditions):
-        return None
-    clauses = _MERGED_CLAUSE_SPLIT_RE.split(conditions)
-    return [_LEADING_CLAUSE_NUMBER_RE.sub("", clause).strip() for clause in clauses]
-
-
-def _normalize_conditions(conditions: str) -> str:
-    """Whitespace/punctuation-insensitive identity for a conditions string.
-    MEASURED against data/reference/eu_fip.json: the dominant Group I
-    clause alone (9,051 of 18,987 rows, 47.7% of Annex II) is stored in
-    three literal forms -- wrapped with a mid-sentence newline, collapsed
-    to one line, and with/without a trailing period. Without this, the
-    "same" clause is treated as three different ones."""
-    return re.sub(r"\s+", " ", conditions).strip().rstrip(".").strip()
-
-
-def _pure_group_match(conditions: str) -> re.Match | None:
-    """Whether `conditions` is EXCLUSIVELY a Group clause, as opposed to a
-    merged multi-clause string where Group is only one co-applicable
-    clause among several -- see _MERGED_CLAUSE_MARKER_RE. Only a pure
-    match is safe to collapse to a shared-block reference without dropping
-    a clause a per-item render would otherwise have shown."""
-    if _MERGED_CLAUSE_MARKER_RE.search(conditions):
-        return None
-    return _GROUP_CONDITIONS_RE.match(_normalize_conditions(conditions))
-
 # food_categories.json's refDataFoodCategoryEN names carry the legal
 # citation inline ("Cocoa and chocolate products as covered by Directive
 # 2000/36/EC"), not as a separate field -- 25 of 154 categories MEASURED to
@@ -195,13 +130,6 @@ def _category_display(fcs_code: str | None, category_name: str | None) -> str:
     if not short:
         return fcs_code or ""
     return f"{short} ({fcs_code})" if fcs_code else short
-
-
-def _is_ancestor_code(candidate_code: str, of_code: str) -> bool:
-    """True if `candidate_code` is a dotted-code ancestor of `of_code` --
-    "14.1" is an ancestor of "14.1.4"; "14.1.4" is not an ancestor of "14.1"
-    (directional) nor of itself."""
-    return candidate_code != of_code and of_code.startswith(candidate_code + ".")
 
 
 def _group_note(conditions: str) -> str | None:
@@ -317,41 +245,6 @@ def _primary_candidate(item: dict) -> dict | None:
     return by_category[0]
 
 
-def _diverging_candidates(item: dict) -> list[dict]:
-    """The category candidates this item's verdict GENUINELY depends on --
-    empty whenever every real (non-ancestor) candidate agrees, or there is
-    only one to begin with, since there is nothing to explain in that
-    case. 2+ elements, confirmed candidate first, only when they truly
-    diverge (MEASURED case: E551 -- permitted under the confirmed 12.2.2,
-    not permitted under 15.1).
-
-    DESIGN FLAW this avoids re-introducing: retrieval can return an
-    ANCESTOR of the real answer alongside it -- Khusmain's candidates were
-    "14.1.4", "14.1" and "14", where the latter two are not alternatives,
-    they CONTAIN 14.1.4. eu_fip records permissions at the leaf, so a
-    parent code always evaluates "not permitted in this category" --
-    true, meaningless, and it would falsely claim a divergence. Ancestors
-    of the reference candidate (_primary_candidate -- confirmed, else the
-    first retrieved) are filtered out before any divergence check runs,
-    exactly as the original verdict strip this replaces did."""
-    by_category = item.get("by_category") or []
-    if not by_category:
-        return []
-    deduped: dict[str, dict] = {}
-    for cv in by_category:
-        deduped.setdefault(cv["fcs_code"], cv)
-    all_candidates = list(deduped.values())
-
-    confirmed_code = item.get("confirmed_fcs_code")
-    top = _primary_candidate(item)
-    reference_code = top["fcs_code"] if top else all_candidates[0]["fcs_code"]
-
-    candidates = [cv for cv in all_candidates if not _is_ancestor_code(cv["fcs_code"], reference_code)]
-    if len(candidates) <= 1 or len({cv["verdict"] for cv in candidates}) <= 1:
-        return []
-    return sorted(candidates, key=lambda cv: cv["fcs_code"] != confirmed_code)
-
-
 # headline -> which count-strip bucket it belongs to. Partitioned purely by
 # each item's `headline` (a single Literal value per item, never more than
 # one), NOT by membership in ProductVerdict.blocking/category_conflict/
@@ -401,232 +294,6 @@ def render_count_strip(counts: dict[str, int]) -> None:
     st.markdown(f"<div class='eu-count-strip'>{cells}</div>", unsafe_allow_html=True)
 
 
-def _verdict_caveats(items: list[dict]) -> list[str]:
-    """The two caveats ProductVerdict.summary (src/rules/engine.py) always
-    states in prose, computed here DETERMINISTICALLY instead -- never from
-    the narration model's output. A prompt is a request, not a guarantee:
-    this project has already measured that three times (fence-stripping,
-    the four different empty-response shapes, and the category-confirmation
-    wording that only had explicit phrasing for one of its two directions).
-    A prompt rule for these two would be a fourth instance of the same
-    mistake, so this is plain code instead -- it cannot go missing because
-    a model declined to mention it, and it is exactly as present on the
-    narrate() fallback path as when narration succeeds, since it never
-    reads narration at all.
-
-    - Dosage: fires whenever ANY item's chosen category carries a real
-      numeric max_level_mg_kg -- the SAME condition src/rules/engine.py's
-      own _build_summary checks for the identical caveat in verdict.summary.
-    - Category confirmation: read directly off each item's OWN flags
-      (category_confirmed_by_user / category_unconfirmed) -- never
-      re-derived from verdict.summary's prose, so a future wording change
-      there cannot silently break this. If any item's category is
-      unconfirmed, that caveat wins over a "you confirmed it" one even when
-      other items in the same product ARE confirmed -- the uncertain case
-      is the one worth surfacing, not the reassuring one.
-    """
-    caveats = []
-
-    has_limit = any(
-        candidate.get("max_level_mg_kg") is not None
-        for item in items
-        for candidate in item.get("by_category") or []
-    )
-    if has_limit:
-        caveats.append(
-            "A label declares that a permitted-with-limit additive is present, not the dosage "
-            "actually used -- the maximum levels shown below cannot be verified from a label alone."
-        )
-
-    unconfirmed = any("category_unconfirmed" in (item.get("flags") or []) for item in items)
-    confirmed = any("category_confirmed_by_user" in (item.get("flags") or []) for item in items)
-    if unconfirmed:
-        caveats.append("The food category was retrieved automatically and has not been confirmed by you.")
-    elif confirmed:
-        caveats.append("You confirmed the food category used for this assessment.")
-
-    return caveats
-
-
-def render_verdict_caveats(items: list[dict]) -> None:
-    """Near the count strip, not inside the narration -- see
-    _verdict_caveats for why these two lines are deterministic code rather
-    than a prompt rule. Caption-styled, not a bordered box: the point is
-    that it cannot go missing, not that it is prominent."""
-    for caveat in _verdict_caveats(items):
-        st.caption(caveat)
-
-
-def _render_conditions_body(conditions: str, note_codes: list[str] | None) -> None:
-    """The conditions text itself, once the citation/date above it are
-    handled by the caller: one caption line per applicable note, then the
-    conditions text -- as a numbered list, one <li> per clause, if
-    merge_conditions() numbered it (_split_merged_clauses), or as a
-    single block otherwise. Never split anywhere else and never hidden
-    behind an expander.
-
-    MEASURED BUG this replaces: the previous version split on the first
-    literal "\\n" in `conditions` (conditions.partition("\\n")) and put
-    everything after it behind a "Conditions of use" expander. eu_fip's
-    own newlines are mid-clause word-wraps, not clause boundaries, so
-    that consistently cut the visible text mid-thought -- e.g. Pepsimain
-    E150d showed "...Period of application:" inline with "until 31 July
-    2014" hidden in the expander; Pepsimain E330 showed "...E 968 may"
-    inline with "not be used except..." hidden. A merged string made it
-    worse: clause 1 rendered inline as plain text while clause 2+ went
-    through st.write() inside the expander, which parsed the literal
-    "2) " marker as a CommonMark ordered-list start -- so a reader saw a
-    list beginning at "2." with no "1." anywhere. Splitting only on the
-    marker merge_conditions() itself inserts, and rendering every clause
-    the SAME way, fixes both: nothing is hidden, and a merged string's
-    numbering always starts at 1 (native <ol> numbering, not the literal
-    "N) " text, which is stripped before display).
-
-    A single, long, un-numbered clause (most of them: only a merge
-    produces the marker this function looks for) still renders as one
-    block, full length, un-split -- see _split_merged_clauses' own
-    docstring for why no weaker boundary (a raw newline, a sentence-end
-    heuristic) is trusted on this data. Shared by
-    _render_citation_and_conditions (one item's own conditions) and
-    render_group_conditions_block (a Group clause's shared block) so this
-    only has to be right in one place."""
-    for note in _conditions_notes(conditions):
-        st.markdown(f"<p class='eu-caption'>{_esc(note)}</p>", unsafe_allow_html=True)
-
-    clauses = _split_merged_clauses(conditions)
-    if clauses:
-        items = "".join(f"<li>{_esc(clause)}</li>" for clause in clauses)
-        st.markdown(f"<ol class='eu-caption'>{items}</ol>", unsafe_allow_html=True)
-    else:
-        st.markdown(f"<p class='eu-caption'>{_esc(conditions)}</p>", unsafe_allow_html=True)
-
-    if note_codes:
-        st.caption("Note codes: " + ", ".join(note_codes))
-
-
-def _group_conditions_map(items: list[dict]) -> dict[str, dict]:
-    """Normalized Group-clause conditions text -> one representative
-    candidate dict carrying that exact text (the first one seen, in item
-    order). Pure and Streamlit-free so it is unit-testable on its own.
-    Only PURE Group clauses are included (see _pure_group_match) -- a
-    merged conditions string where Group is one of several co-applicable
-    clauses is deliberately excluded, so it keeps rendering in full,
-    per item, and never loses a clause a per-item render would have
-    shown."""
-    reps: dict[str, dict] = {}
-    for item in items:
-        top = _primary_candidate(item)
-        conditions = (top or {}).get("conditions")
-        if not conditions or not _pure_group_match(conditions):
-            continue
-        reps.setdefault(_normalize_conditions(conditions), top)
-    return reps
-
-
-def render_group_conditions_block(items: list[dict]) -> dict[str, str]:
-    """Renders every DISTINCT Group clause (Group I, Group II, ...) found
-    across every item passed in -- whatever its Status -- since a
-    category-dependent item's confirmed candidate can carry the identical
-    text a plainly-permitted item's does, not just a permitted one --
-    exactly once, before the additives table renders. Returns
-    normalized-text -> anchor-id so render_additives_table's per-row
-    detail (_render_citation_and_conditions) can replace every occurrence
-    of that text with a short in-page link back here
-    (`<a href="#anchor-id">`) instead of repeating the clause verbatim per
-    additive (MEASURED: one clause alone covers 9,051 of 18,987 eu_fip
-    rows, 47.7% of the EU's additive permissions list). Renders nothing,
-    and returns {}, if no item's conditions is a pure Group clause --
-    callers can call this unconditionally.
-
-    Titled "Shared conditions", not "Group conditions": "Group I"/"Group
-    II" are real EU terms that appear in the quoted law below (and are
-    explained, every time, by _group_note, immediately above the clause
-    that uses them) -- but the SECTION heading itself should not presume
-    a reader already knows what a "Group" is before reaching that
-    explanation."""
-    reps = _group_conditions_map(items)
-    if not reps:
-        return {}
-
-    registry = {normalized: f"group-conditions-{i + 1}" for i, normalized in enumerate(reps)}
-
-    st.markdown("<div class='eu-section-title'>Shared conditions</div>", unsafe_allow_html=True)
-    st.markdown(
-        "<p class='eu-caption'>Some additives below share the exact same EU rule. It is shown once "
-        "here -- look for a link back to it under any additive that uses it.</p>",
-        unsafe_allow_html=True,
-    )
-    for normalized, top in reps.items():
-        st.markdown(f"<div id='{registry[normalized]}'></div>", unsafe_allow_html=True)
-        _render_conditions_body(top["conditions"], top.get("note_codes"))
-        st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
-
-    return registry
-
-
-def _render_citation_and_conditions(
-    top: dict | None, flags: list[str], group_registry: dict[str, str] | None = None
-) -> None:
-    """The citation (a real link, or an explicit "no source URL" note --
-    never silence), the in-force date, and the conditions -- via
-    _render_conditions_body, never split except at a merge_conditions()
-    clause boundary. Called from _render_additive_detail, one additive's
-    expander at a time -- kept as its own function so a citation or a
-    numbered-conditions fix only has to happen once.
-
-    When `top`'s conditions is a PURE Group clause already rendered once
-    by render_group_conditions_block (its anchor id is in group_registry,
-    keyed by normalized text), the full text is replaced by a short link
-    back to that shared block instead of repeating it here -- an
-    unambiguous jump target for a reader who lands mid-page, not just
-    prose saying "above". Anything else (no match, or a merged string
-    where Group is only one of several clauses) renders exactly as
-    before."""
-    if top is not None:
-        # Every source_url becomes a real link; a null one says so
-        # explicitly instead of silently rendering nothing -- this is the
-        # inconsistency fix: previously only the uncitable_verdict FLAG
-        # (which can be set by a DIFFERENT candidate than the one shown)
-        # triggered a note, so some missing citations were silent.
-        if top.get("source_url"):
-            st.markdown(
-                f"<p class='eu-caption'><a href='{_esc(top['source_url'])}' target='_blank'>Source</a></p>",
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                "<p class='eu-caption'>No source URL on this record.</p>", unsafe_allow_html=True
-            )
-        # "in force since", not "retrieved" -- this date is eu_fip's
-        # effective_date (when the provision entered force), never when
-        # the data was fetched. This project tracks no real retrieval date
-        # for eu_fip, so that second line is omitted rather than faked.
-        if top.get("retrieved_date"):
-            st.markdown(
-                f"<p class='eu-caption'>In force since {_esc(top['retrieved_date'])}.</p>",
-                unsafe_allow_html=True,
-            )
-    elif "uncitable_verdict" in flags:
-        st.markdown(
-            "<p class='eu-caption'>No citable source is recorded for this verdict.</p>",
-            unsafe_allow_html=True,
-        )
-
-    if top and top.get("conditions"):
-        conditions = top["conditions"]
-        anchor = (group_registry or {}).get(_normalize_conditions(conditions))
-        if anchor:
-            group_match = _pure_group_match(conditions)
-            group_name = group_match.group(1) if group_match else "Group"
-            st.markdown(
-                f"<p class='eu-caption'>Permitted via {_esc(group_name)} — see the "
-                f"<a href='#{anchor}'>{_esc(group_name)} conditions above</a>.</p>",
-                unsafe_allow_html=True,
-            )
-        else:
-            _render_conditions_body(conditions, top.get("note_codes"))
-
-
 # Worst-first: a reader should see what needs a decision before what
 # doesn't. Any status not in this map (should not happen -- _status_label
 # only ever returns one of these four) sorts last, not first, so a bug in
@@ -648,7 +315,15 @@ def _additive_row(item: dict, names: dict[int, str] | None) -> dict:
     first retrieved. `top` is None only for a headline-only block
     (not_authorised_eu with no by_category at all -- absence/prohibition
     is jurisdiction-wide, not category-dependent, so there is no category
-    row to look anything up against)."""
+    row to look anything up against).
+
+    Where: the component name when the item has one, the category
+    display (name + code) when it doesn't -- NEVER both. MEASURED BUG
+    this replaces: "Seasoning: Seasonings and condiments (12.2.2)" showed
+    the component AND the category name together, and for a component
+    like "Seasoning" the two are near-duplicates of each other -- the
+    component label already tells the reader which part of the product
+    this is about, so the category name added nothing, just repetition."""
     top = _primary_candidate(item)
     display_name = _display_name(item, names)
     eu_id = item.get("eu_canonical_id")
@@ -661,10 +336,8 @@ def _additive_row(item: dict, names: dict[int, str] | None) -> dict:
         status, bucket = _status_label(top["verdict"], top.get("max_level_mg_kg"))
         max_amount = _max_amount_cell(top["verdict"], top.get("max_level_mg_kg"))
         in_force = top.get("retrieved_date") or "—"
-        where = _category_display(top.get("fcs_code"), top.get("category_name"))
         component = item.get("component_label")
-        if component:
-            where = f"{component}: {where}"
+        where = component or _category_display(top.get("fcs_code"), top.get("category_name"))
 
     return {
         "item": item,
@@ -679,61 +352,7 @@ def _additive_row(item: dict, names: dict[int, str] | None) -> dict:
     }
 
 
-def _detail_lead_line(row: dict) -> str:
-    """The plain-English sentence above the conditions text in a row's
-    expander -- what the status means for THIS product, in one sentence,
-    never a reword of the LAW itself (that stays verbatim, immediately
-    below -- see _render_citation_and_conditions). Deterministic
-    templates, not a model summary: this project has measured three
-    times elsewhere (src/report/narrator.py) that a prompt is a request,
-    not a guarantee, and getting this ONE sentence wrong (claiming a
-    condition says something it doesn't) is worse than a slightly
-    generic-but-always-true one."""
-    top = row["top"]
-    name = row["display_name"]
-    if top is None or top["verdict"] == "not_authorised_eu":
-        return f"{name} is {_blocking_reason(row['item'])}."
-    if top["verdict"] == "not_permitted_in_category":
-        return f"{name} is not permitted for use in {_category_display(top.get('fcs_code'), top.get('category_name'))}."
-    where = _category_display(top.get("fcs_code"), top.get("category_name"))
-    if top.get("conditions"):
-        return (
-            f"{name} is allowed in {where}, subject to the condition below — read it before using "
-            "this ingredient here."
-        )
-    return f"{name} is allowed in {where}."
-
-
-def _render_additive_detail(row: dict, group_registry: dict[str, str] | None) -> None:
-    """Everything that doesn't fit a table cell: the plain-English lead
-    line, which part of the product this depends on (only when
-    candidates genuinely diverge -- _diverging_candidates), and the
-    citation/in-force-date/conditions text verbatim
-    (_render_citation_and_conditions, unchanged machinery)."""
-    item = row["item"]
-    st.markdown(f"<p class='eu-caption'>{_esc(_detail_lead_line(row))}</p>", unsafe_allow_html=True)
-
-    diverging = _diverging_candidates(item)
-    if diverging:
-        confirmed_code = item.get("confirmed_fcs_code")
-        st.markdown(
-            "<p class='eu-caption'>This depends on which part of the product it applies to:</p>",
-            unsafe_allow_html=True,
-        )
-        lines = []
-        for cv in diverging:
-            status, _bucket = _status_label(cv["verdict"], cv.get("max_level_mg_kg"))
-            where = _category_display(cv["fcs_code"], cv.get("category_name"))
-            tag = " — confirmed" if cv["fcs_code"] == confirmed_code else ""
-            lines.append(f"<li>{_esc(status)} in {_esc(where)}{tag}.</li>")
-        st.markdown(f"<ul class='eu-caption'>{''.join(lines)}</ul>", unsafe_allow_html=True)
-
-    _render_citation_and_conditions(row["top"], item.get("flags") or [], group_registry)
-
-
-def render_additives_table(
-    items: list[dict], names: dict[int, str] | None = None, group_registry: dict[str, str] | None = None
-) -> None:
+def render_additives_table(items: list[dict], names: dict[int, str] | None = None) -> None:
     """The primary results view, one row per additive: Additive / Status /
     Maximum amount / In force since / Where -- worst-first
     (_STATUS_SEVERITY), so a reader sees what needs a decision before
@@ -743,16 +362,15 @@ def render_additives_table(
     read off one plain column instead of three differently-labelled
     sections a reader had to already understand the difference between.
 
-    Each row expands (one st.expander per row, directly below the table
-    -- the same pattern render_substitutes already uses for per-candidate
-    detail, since an HTML <table> cannot host a Streamlit widget inside a
-    <tr>) to show what does not fit a cell -- see _render_additive_detail.
+    The table ONLY -- no per-row expander, no conditions text, no source
+    link, no category-divergence detail on screen at all. That detail
+    (the legal basis for every verdict) lives in the PDF/JSON exports
+    instead (src/report/export.py's _item_flowables / verdict.model_dump()),
+    never on the results screen: a compliance officer defending a decision
+    downloads the report, they do not scroll a live page for it.
 
     No same-block grouping (contrast the old render_permitted_section):
-    "one row per additive" is now literal, and the repetition cost that
-    grouping existed to avoid is gone anyway now that conditions text is
-    collapsed behind a closed expander by default, not printed inline
-    for every additive that shares it."""
+    "one row per additive" is literal."""
     if not items:
         return
     rows = sorted(
@@ -776,10 +394,6 @@ def render_additives_table(
         f"</tr></thead><tbody>{table_rows}</tbody></table>",
         unsafe_allow_html=True,
     )
-
-    for r in rows:
-        with st.expander(r["additive"]):
-            _render_additive_detail(r, group_registry)
 
 
 def render_out_of_scope(items: list[dict], names: dict[int, str] | None = None) -> None:
@@ -1079,32 +693,22 @@ def _render_route_news(route_news_signals: list[dict], route_news_category: str 
 
 
 def render_horizon(result: dict) -> None:
-    """Regulatory-horizon signals. The coverage caveat (see docs/findings.md
-    F-12) is never DROPPED -- silently making a partial dataset read as
-    comprehensive is exactly the bug F-12 covers -- but it no longer prints
-    unconditionally: three paragraphs explaining the limits of an empty
-    result is worse than the empty result. Both caveats live in "About
-    these signals", one line short of always-visible; the empty-signals
-    case gets a single line that points there. news_signals (a DIFFERENT
-    source -- retrieved, not curated; see _render_news_signals) renders
-    below the EFSA table, never merged into it. route_news_signals
-    (India -> EU, whole-category -- see _render_route_news) renders as
-    its OWN, separately-titled section after that, never merged into
-    either."""
+    """Regulatory-horizon signals. The "About these signals" advisory-only
+    disclaimer and the partial-coverage warnings (see docs/findings.md
+    F-12) are DELIBERATELY not rendered here at all -- results-screen
+    simplification removed that expander -- but neither is silently lost:
+    both still appear in the PDF/JSON exports (src/report/export.py's
+    _horizon_flowables includes horizon.warnings unconditionally). The
+    empty-signals case keeps its own single always-visible caption line,
+    since that is orientation ("was anything found"), not the removed
+    disclaimer. news_signals (a DIFFERENT source -- retrieved, not
+    curated; see _render_news_signals) renders below the EFSA table,
+    never merged into it. route_news_signals (India -> EU, whole-category
+    -- see _render_route_news) renders as its OWN, separately-titled
+    section after that, never merged into either."""
     st.markdown("<div class='eu-section-title'>Regulatory horizon</div>", unsafe_allow_html=True)
 
     signals = result.get("signals") or []
-    warnings = result.get("warnings") or []
-
-    with st.expander("About these signals"):
-        st.markdown(
-            "<p class='eu-section-note'>Advisory only. These signals never change the compliance "
-            "verdict above -- an EFSA opinion is not law. Additives can be re-assessed by EFSA years "
-            "before the law changes; these are early signals, not current requirements.</p>",
-            unsafe_allow_html=True,
-        )
-        for warning in warnings:
-            st.markdown(f"<p class='eu-caption'>{_esc(warning)}</p>", unsafe_allow_html=True)
 
     if not signals:
         st.caption("No EFSA review signals for these additives. Coverage is partial — see the report notes.")

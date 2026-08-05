@@ -7,302 +7,6 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
-_DOSAGE_ITEM = {
-    "by_category": [
-        {
-            "fcs_code": "3",
-            "category_name": "edible ices",
-            "rank": 1,
-            "verdict": "permitted_with_limit",
-            "max_level_mg_kg": 100.0,
-            "max_level_basis": "mg/kg",
-            "conditions": None,
-            "note_codes": [],
-            "source_url": None,
-            "retrieved_date": None,
-        }
-    ],
-    "flags": [],
-}
-
-
-def _render_caveats_script(narration_model_id: str, narration_summary: str) -> str:
-    """A minimal script reproducing render_results' narration -> caveats
-    sequence -- narration.summary/model_id are rendered exactly as
-    render_results renders them (same st.markdown/st.caption calls, same
-    text app.py itself would produce for this model_id), then
-    components.render_verdict_caveats is called with an item carrying a
-    real max_level_mg_kg. The ONLY thing that varies between calls of this
-    helper is the narration state; the item list (and therefore the
-    caveat) never changes."""
-    written_by = f"Written by {narration_model_id} from the assessment above. It adds no facts."
-    return f"""
-import streamlit as st
-from src.ui import components
-
-st.markdown({narration_summary!r})
-st.caption({written_by!r})
-components.render_verdict_caveats([{_DOSAGE_ITEM!r}])
-"""
-
-
-def test_dosage_caveat_renders_when_narration_succeeded():
-    at = AppTest.from_string(
-        _render_caveats_script("gemini-3.5-flash", "This product is not blocked.")
-    ).run()
-    captions = [c.value for c in at.caption]
-    assert any("dosage" in c.lower() for c in captions)
-
-
-def test_dosage_caveat_renders_when_narration_fell_back():
-    # narrate()'s own fallback shape (src/report/narrator.py): model_id
-    # "unavailable", summary set to verdict.summary verbatim. The caveat
-    # must render identically here -- it does not read narration at all,
-    # so there is nothing in this branch that COULD suppress it, but this
-    # is the guard against a future change accidentally coupling the two.
-    fallback_summary = "12 item(s) evaluated. No item was found not permitted."
-    at = AppTest.from_string(_render_caveats_script("unavailable", fallback_summary)).run()
-    captions = [c.value for c in at.caption]
-    assert any("dosage" in c.lower() for c in captions)
-
-
-def test_dosage_caveat_identical_regardless_of_narration_state():
-    at_success = AppTest.from_string(
-        _render_caveats_script("gemini-3.5-flash", "This product is not blocked.")
-    ).run()
-    at_fallback = AppTest.from_string(
-        _render_caveats_script("unavailable", "12 item(s) evaluated.")
-    ).run()
-
-    dosage_success = next(c.value for c in at_success.caption if "dosage" in c.value.lower())
-    dosage_fallback = next(c.value for c in at_fallback.caption if "dosage" in c.value.lower())
-    assert dosage_success == dosage_fallback
-
-
-# ---- Group I/II/... shared-block dedup (app.py's render_results wiring) ---
-
-# Two whitespace variants of the exact same clause, exactly as eu_fip
-# actually stores it in more than one form (see
-# tests/test_components.py's _normalize_conditions tests for the measured
-# variant count against the real data).
-_GROUP_CLAUSE_A = "Permitted via Group I, Additives; ML = quantum satis; except E 425 ML = 10000 mg/kg."
-_GROUP_CLAUSE_B = "Permitted via Group I, Additives; ML = quantum satis; except E 425 ML =\n10000 mg/kg."
-
-
-def _group_conditions_item(eu_id, component, fcs_code, category_name, conditions):
-    return {
-        "eu_canonical_id": eu_id,
-        "component_label": component,
-        "flags": [],
-        "confirmed_fcs_code": fcs_code,
-        "by_category": [
-            {
-                "fcs_code": fcs_code,
-                "category_name": category_name,
-                "rank": 1,
-                "verdict": "permitted_qs",
-                "max_level_mg_kg": None,
-                "max_level_basis": None,
-                "conditions": conditions,
-                "note_codes": [],
-                "source_url": f"https://example.org/{eu_id}",
-                "retrieved_date": "2020-01-01",
-            }
-        ],
-    }
-
-
-def _render_group_conditions_script() -> str:
-    item_a = _group_conditions_item("300", "CRISPS", "14.1.4", "Flavoured drinks", _GROUP_CLAUSE_A)
-    item_b = _group_conditions_item("301", "SEASONING", "12.2.2", "Seasonings", _GROUP_CLAUSE_B)
-    return f"""
-import streamlit as st
-from src.ui import components
-
-item_a = {item_a!r}
-item_b = {item_b!r}
-registry = components.render_group_conditions_block([item_a, item_b])
-components.render_additives_table([item_a, item_b], group_registry=registry)
-"""
-
-
-def test_group_conditions_render_once_with_a_reference_for_the_repeat():
-    at = AppTest.from_string(_render_group_conditions_script()).run()
-    assert not at.exception
-
-    markdown_html = "\n".join(m.value for m in at.markdown)
-    # The full clause (either whitespace variant collapses to this once
-    # normalized) appears exactly once -- in the shared block -- not once
-    # per additive that carries it.
-    assert markdown_html.count("Permitted via Group I, Additives; ML = quantum satis") == 1
-    # Both additives are still traceable: each links back to the shared
-    # block instead of the text vanishing outright.
-    assert (
-        markdown_html.count(
-            "see the <a href='#group-conditions-1'>Group I, Additives conditions above</a>"
-        )
-        == 2
-    )
-    # The shared block's anchor exists so that link actually resolves.
-    assert "id='group-conditions-1'" in markdown_html
-    # Every item keeps its OWN citation -- collapsing conditions to a
-    # reference must not touch source/date, which differ per item.
-    assert "https://example.org/300" in markdown_html
-    assert "https://example.org/301" in markdown_html
-
-
-def test_group_conditions_block_absent_when_no_item_carries_one():
-    script = """
-from src.ui import components
-
-item = {
-    "eu_canonical_id": "1",
-    "component_label": None,
-    "flags": [],
-    "confirmed_fcs_code": "5.2",
-    "by_category": [
-        {
-            "fcs_code": "5.2",
-            "category_name": "Cocoa",
-            "rank": 1,
-            "verdict": "permitted_qs",
-            "max_level_mg_kg": None,
-            "max_level_basis": None,
-            "conditions": "only tuna",
-            "note_codes": [],
-            "source_url": None,
-            "retrieved_date": None,
-        }
-    ],
-}
-registry = components.render_group_conditions_block([item])
-assert registry == {}
-"""
-    at = AppTest.from_string(script).run()
-    assert not at.exception
-    assert at.markdown == []
-
-
-# ---- A4/A5: conditions text must never split on a raw newline, and a
-# merged clause's numbering must start at 1, not 2 -- MEASURED real strings
-# from data/outputs/verdict/ (Chipsmain E551, Ice-creammain Group I, and
-# Pepsimain E150d/E330), not constructed text. Each is rendered through
-# render_group_conditions_block, the same public entry point
-# test_group_conditions_render_once_with_a_reference_for_the_repeat above
-# uses, so this exercises the real call path, not just the pure helper. ---
-
-# eu_fip's own "\n" mid-clause word-wrap -- NOT a clause boundary.
-# MEASURED: previously rendered inline as "...Period of application:" with
-# "until 31 July 2014" hidden behind a "Conditions of use" expander.
-_PEPSI_E150D_CONDITIONS = (
-    "Permitted via Group II, Colours at quantum satis; excluding chocolate milk and malt "
-    "products  Period of application:\nuntil 31 July 2014"
-)
-# MEASURED: previously rendered inline as "...E 968 may" with "not be used
-# except where specifically provided..." hidden in the expander.
-_PEPSI_E330_CONDITIONS = (
-    "Permitted via Group I, Additives; E 420, E 421, E 953, E 965, E 966 and E 967 may not be "
-    "used  E 968 may\nnot be used except where specifically provided for in this food category"
-)
-# MEASURED: our OWN eu_fip.json data for this row ends exactly here, with no
-# "\n" anywhere -- this case was never actually mis-split (partition("\n")
-# on a string with no "\n" returns it whole); it is included because it is
-# one of the four reported strings and must be confirmed to render whole,
-# not because it exercises the split logic differently from any other
-# single, un-merged clause.
-_CHIPS_E551_CONDITIONS = (
-    "Permitted via Silicon dioxide - silicates; only seasoning  Period of application:  from 1 "
-    "February 2014; Note 1: The additives may be added individually or in combination"
-)
-# MEASURED, genuinely merged (2 distinct eu_fip rows for E 965/968 in
-# Ice-creammain): previously rendered clause 1 inline as plain text and
-# clause 2 in the expander via st.write(), which read the literal "2) "
-# marker as a CommonMark ordered-list start -- a list beginning at "2."
-# with no "1." anywhere.
-_ICE_CREAM_GROUP_I_CONDITIONS = (
-    "1) Permitted via Group I, Additives; ML = quantum satis; except E 425 ML = 10000 mg/kg; "
-    "E 620 to E 625, ML =\n10000 mg/kg individually or in combination, expressed as glutamic "
-    "acid;\nE 626 to E 635, ML = 500 mg/kg individually or in combination, expressed\nas "
-    "guanylic acid.\n\n2) Permitted via Group IV, Polyols; only energy-reduced or with no "
-    "added sugar"
-)
-
-
-def _render_single_conditions_script(eu_id: str, conditions: str) -> str:
-    # render_additives_table, not render_group_conditions_block: the
-    # latter only renders items whose conditions are a PURE Group clause
-    # (_pure_group_match) -- Chipsmain E551 (a named-substance clause, not
-    # a Group one) and the Ice-cream merged 2-clause string (correctly
-    # excluded by _pure_group_match's own merged-clause guard) would both
-    # render NOTHING through it. render_additives_table calls
-    # _render_conditions_body unconditionally for any item's own
-    # conditions (no group_registry passed here), so it exercises the
-    # actual code path every item's conditions go through by default.
-    item = _group_conditions_item(eu_id, None, "14.1.4", "Flavoured drinks", conditions)
-    return f"""
-from src.ui import components
-
-item = {item!r}
-components.render_additives_table([item])
-"""
-
-
-def test_pepsi_e150d_conditions_render_whole_never_split_or_hidden():
-    at = AppTest.from_string(
-        _render_single_conditions_script("150d", _PEPSI_E150D_CONDITIONS)
-    ).run()
-    assert not at.exception
-    # UI REDESIGN (ui-simplify): every row now gets exactly ONE expander
-    # (the row's own detail disclosure) -- the A4 property this locks down
-    # is that BOTH halves of the OLD lead/rest split are together INSIDE
-    # that single expander, not one inline and the other missing.
-    assert len(at.expander) == 1
-    detail_html = "\n".join(m.value for m in at.expander[0].markdown)
-    assert "Period of application:" in detail_html
-    assert "until 31 July 2014" in detail_html
-
-
-def test_pepsi_e330_conditions_render_whole_never_split_or_hidden():
-    at = AppTest.from_string(
-        _render_single_conditions_script("330", _PEPSI_E330_CONDITIONS)
-    ).run()
-    assert not at.exception
-    assert len(at.expander) == 1
-    detail_html = "\n".join(m.value for m in at.expander[0].markdown)
-    assert "E 968 may" in detail_html
-    assert "not be used except where specifically provided" in detail_html
-
-
-def test_chips_e551_conditions_render_whole():
-    at = AppTest.from_string(
-        _render_single_conditions_script("551", _CHIPS_E551_CONDITIONS)
-    ).run()
-    assert not at.exception
-    assert len(at.expander) == 1
-    detail_html = "\n".join(m.value for m in at.expander[0].markdown)
-    assert "Note 1: The additives may be added individually or in combination" in detail_html
-
-
-def test_ice_cream_group_i_merged_clauses_render_as_one_list_starting_at_1():
-    at = AppTest.from_string(
-        _render_single_conditions_script("965", _ICE_CREAM_GROUP_I_CONDITIONS)
-    ).run()
-    assert not at.exception
-    assert len(at.expander) == 1
-    detail_html = "\n".join(m.value for m in at.expander[0].markdown)
-    # Both clauses present, together -- clause 2 is not hidden separately.
-    assert "Permitted via Group I, Additives; ML = quantum satis" in detail_html
-    assert "Permitted via Group IV, Polyols; only energy-reduced" in detail_html
-    # Rendered as one native ordered list, not two differently-styled
-    # blocks -- exactly one <ol>, two <li>s.
-    assert detail_html.count("<ol") == 1
-    assert detail_html.count("<li>") == 2
-    # The literal "2) " marker text is stripped before display -- the ONLY
-    # numbering the reader sees is the <ol>'s own, which starts at 1 by
-    # construction; the raw marker must not survive as visible text.
-    assert "2) Permitted via Group IV" not in detail_html
-
-
 # ---- Email export: server-side SMTP only, no credential form ------------
 
 # A minimal but real ProductVerdict/SubstituteResult/HorizonResult/
@@ -418,6 +122,71 @@ def test_no_smtp_credential_fields_remain_in_app_source():
     )
     for snippet in removed_snippets:
         assert snippet not in source, f"{snippet!r} should no longer appear in app.py"
+
+
+# ---- Narration: shown only on success, silent on failure ----------------
+
+# Mirrors app.py's render_results narration block exactly (see the comment
+# immediately above `if narration.model_id != "unavailable":` in app.py) --
+# render_results itself needs a full verdict/substitute/horizon/extraction
+# session_state to run end-to-end (see _EXPORT_SECTION_SCRIPT above for how
+# heavy that setup is for a single boolean gate), so this isolates just the
+# conditional under test, the same way the horizon tests below isolate
+# render_horizon rather than going through render_results.
+_NARRATION_SCRIPT = """
+import streamlit as st
+from src.report.narrator import Narration
+
+narration = Narration(
+    summary=__SUMMARY__,
+    detail={"Scope": ["Applies EU-wide."]},
+    model_id=__MODEL_ID__,
+    unfaithful_claims=[],
+)
+
+if narration.model_id != "unavailable":
+    st.markdown(narration.summary)
+    for topic, points in narration.detail.items():
+        st.markdown(f"**{topic}**")
+        for point in points:
+            st.markdown(f"- {point}")
+    st.caption(f"Written by {narration.model_id} from the assessment above. It adds no facts.")
+    if narration.unfaithful_claims:
+        st.warning(
+            "The narration above contains claims NOT found in the underlying assessment: "
+            + "; ".join(narration.unfaithful_claims)
+        )
+"""
+
+
+def test_narration_failure_renders_nothing():
+    # model_id == "unavailable" is narrate()'s own fallback signal (see
+    # src/report/narrator.py) -- on this screen a system failure must show
+    # NOTHING, not a "Narration was unavailable" note or a "Written by
+    # unavailable" caption.
+    script = _NARRATION_SCRIPT.replace("__SUMMARY__", repr("1 item(s) evaluated.")).replace(
+        "__MODEL_ID__", repr("unavailable")
+    )
+    at = AppTest.from_string(script).run()
+    assert not at.exception
+    assert at.markdown == []
+    assert at.caption == []
+
+
+def test_narration_success_still_renders():
+    # The inverse: a real model_id means the prose, detail, and "Written
+    # by" caption all render -- proves the guard isn't hiding narration
+    # unconditionally.
+    script = _NARRATION_SCRIPT.replace("__SUMMARY__", repr("Not blocked.")).replace(
+        "__MODEL_ID__", repr("fake-model")
+    )
+    at = AppTest.from_string(script).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "Not blocked." in markdown_html
+    assert "Applies EU-wide." in markdown_html
+    captions = [c.value for c in at.caption]
+    assert "Written by fake-model from the assessment above. It adds no facts." in captions
 
 
 # ---- Horizon news signals (src/ui/components.py's render_horizon) -------
@@ -636,3 +405,20 @@ def test_horizon_efsa_table_and_news_signals_both_render_and_stay_distinct():
     assert "Sucralose" in markdown_html  # the EFSA (curated) signal
     assert "Titanium dioxide" in markdown_html  # the retrieved news signal
     assert "From retrieved news" in markdown_html  # the distinct provenance label
+
+
+def test_horizon_about_these_signals_expander_is_gone():
+    # TASK: the "About these signals" expander was removed from the
+    # results screen entirely (the disclaimer/warnings it held still
+    # reach the PDF/JSON exports -- see render_horizon's own docstring).
+    result = {
+        "signals": [],
+        "checked_ids": [],
+        "warnings": ["Some signals could not be verified."],
+        "data_version": "test",
+        "data_retrieved": None,
+        "news_signals": [_NEWS_SIGNAL],
+    }
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    assert at.expander == []
