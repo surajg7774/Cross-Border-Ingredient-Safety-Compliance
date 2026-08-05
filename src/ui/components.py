@@ -925,6 +925,13 @@ _NEWS_CATEGORY_LABELS = {
     "consumer_alert": "Consumer alert",
 }
 
+_ROUTE_NEWS_CATEGORY_LABELS = {
+    "import_control": "EU import control",
+    "border_rejection": "Rejected at the EU border",
+    "trade_agreement": "Trade agreement development",
+    "consumer_alert": "EU consumer alert",
+}
+
 
 def _order_news_signals(news_signals: list[dict]) -> list[dict]:
     """`news_signals`, grouped by additive (first-appearance order
@@ -1004,6 +1011,73 @@ def _render_news_signals(news_signals: list[dict]) -> None:
         st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
 
 
+def _render_route_news(route_news_signals: list[dict], route_news_category: str | None) -> None:
+    """India -> EU trade/import news about this product's food CATEGORY,
+    never about one specific additive -- a SEPARATE section from
+    _render_news_signals (additive-scoped), with its OWN section title,
+    so a route headline ("EU tightens checks on Indian spice imports")
+    can never be mistaken for something about one substance: nothing here
+    ever carries an eu_canonical_id (see RouteNewsSignal's own docstring
+    for why it structurally cannot). Same provenance discipline as the
+    additive lane -- stated plainly, not just in an expander.
+
+    Unlike _render_news_signals (which has nothing worth saying about an
+    additive with zero signals -- rendering nothing at all), this section
+    is ALWAYS shown when the lane ran at all (route_news_category is not
+    None): an explicit "nothing found" line, naming what was searched, is
+    a more useful answer than an absent section -- a reader should not
+    have to wonder whether the route lane ran and found nothing, or never
+    ran at all. Renders nothing only when route_news_category is None --
+    the lane never ran this screening (no search provider configured, or
+    a HorizonResult built without ever touching the graph's news_node at
+    all, e.g. app.py's legacy non-graph fallback path)."""
+    if route_news_category is None:
+        return
+
+    st.markdown("<div class='eu-section-title'>Import route: India → EU</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<p class='eu-caption'>About exporting this product's food category from India to the EU -- "
+        "never about one specific additive. Automatically retrieved from web search, not vetted by a "
+        "person. Read the source before acting on any of these.</p>",
+        unsafe_allow_html=True,
+    )
+
+    if not route_news_signals:
+        st.caption(f"No recent EU news found about {route_news_category} exports from India in this category.")
+        return
+
+    for signal in route_news_signals:
+        category = signal.get("category")
+        category_label = _ROUTE_NEWS_CATEGORY_LABELS.get(category, category or "")
+        st.markdown(
+            f"<span class='eu-badge'>{_esc(category_label)}</span> "
+            f"{_esc(signal.get('origin'))} {_esc(signal.get('category_name'))} exports",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<p class='eu-caption'>“{_esc(signal.get('quoted_span'))}”</p>", unsafe_allow_html=True)
+
+        source_url = signal.get("source_url")
+        source_line = (
+            f"<a href='{_esc(source_url)}' target='_blank'>Source</a>"
+            if source_url
+            else "No source URL on this record."
+        )
+        published_date = signal.get("published_date")
+        date_part = f" · {_esc(published_date)}" if published_date else ""
+        st.markdown(f"<p class='eu-caption'>{source_line}{date_part}</p>", unsafe_allow_html=True)
+
+        # A quality issue carried from src/horizon/search.py's
+        # validate_search_result or src/horizon/news_cache.py's stale-
+        # serve path -- same discipline _render_news_signals follows.
+        flags = signal.get("flags") or []
+        if flags:
+            st.markdown(
+                f"<p class='eu-caption'><span class='eu-badge warn'>{_esc(', '.join(flags))}</span></p>",
+                unsafe_allow_html=True,
+            )
+        st.markdown("<div class='eu-hairline'></div>", unsafe_allow_html=True)
+
+
 def render_horizon(result: dict) -> None:
     """Regulatory-horizon signals. The coverage caveat (see docs/findings.md
     F-12) is never DROPPED -- silently making a partial dataset read as
@@ -1013,7 +1087,10 @@ def render_horizon(result: dict) -> None:
     these signals", one line short of always-visible; the empty-signals
     case gets a single line that points there. news_signals (a DIFFERENT
     source -- retrieved, not curated; see _render_news_signals) renders
-    below the EFSA table, never merged into it."""
+    below the EFSA table, never merged into it. route_news_signals
+    (India -> EU, whole-category -- see _render_route_news) renders as
+    its OWN, separately-titled section after that, never merged into
+    either."""
     st.markdown("<div class='eu-section-title'>Regulatory horizon</div>", unsafe_allow_html=True)
 
     signals = result.get("signals") or []
@@ -1063,3 +1140,4 @@ def render_horizon(result: dict) -> None:
             )
 
     _render_news_signals(result.get("news_signals") or [])
+    _render_route_news(result.get("route_news_signals") or [], result.get("route_news_category"))

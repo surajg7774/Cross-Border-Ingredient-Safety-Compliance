@@ -73,8 +73,8 @@ import logging
 import re
 from datetime import date
 
-from src.horizon.news_cache import get_search_results
-from src.horizon.schemas import NewsSignal
+from src.horizon.news_cache import get_search_results, normalise_additive_identity
+from src.horizon.schemas import NewsSignal, RouteNewsSignal
 from src.horizon.search import SearchProvider, SearchResult, validate_search_result
 from src.model_call import strip_markdown_fences
 from src.text_generation import get_text_generator
@@ -529,7 +529,11 @@ def find_news_signals(
             return provider.search(query, include_domains=list(_INCLUDE_DOMAINS), days=_DEFAULT_DAYS)
 
         try:
-            raw_results, updated_cache, cache_flags = get_search_results(updated_cache, additive_id, _fetch, today)
+            # get_search_results no longer normalises its key itself (see
+            # its own docstring) -- this lane's own key shape (additive
+            # identity) is applied here, once, before the call.
+            cache_key = normalise_additive_identity(additive_id)
+            raw_results, updated_cache, cache_flags = get_search_results(updated_cache, cache_key, _fetch, today)
         except Exception as exc:  # noqa: BLE001 -- one additive's search failing must not lose the rest
             log.warning(
                 "find_news_signals: search failed for %s (%s), skipping: %s: %s",
@@ -558,3 +562,371 @@ def find_news_signals(
             signals.append(signal)
 
     return signals, updated_cache
+
+
+# =========================================================================== #
+# ROUTE-SCOPED NEWS: ONE query per screening -- about exporting this kind of
+# product from India to the EU, not one per additive. A headline like "EU
+# tightens checks on Indian spice imports" attaches to the PRODUCT CATEGORY
+# and the COUNTRY, not to any single additive, so it cannot hang off
+# eu_canonical_id the way find_news_signals' signals do -- see RouteNewsSignal
+# (src/horizon/schemas.py) for the schema-level consequence of that.
+#
+# Everything genuinely generic above is REUSED, unchanged: _call_model (and
+# its retry budget), the quoted_span verbatim-substring check (same shape,
+# re-implemented inline below rather than factored out, matching classify_
+# and_quote's own inline shape), check_modality_backstop (called literally,
+# no route-specific version -- a severity word like "banned" is exactly as
+# invalid whether the subject is an additive or a shipment), SearchProvider/
+# validate_search_result/get_search_results, _INCLUDE_DOMAINS, _DEFAULT_DAYS.
+# Only the pieces that are inherently ADDITIVE-shaped (the category set, the
+# prompt, the render template, classify_and_quote/check_category_consistency
+# themselves) get a route-specific sibling -- classify_and_quote and check_
+# category_consistency are NOT modified, NOT parameterised to handle both
+# shapes: they stay exactly as they were, reused as-is by find_news_signals,
+# per the constraint that the additive lane's own behaviour is untouched.
+# =========================================================================== #
+
+_ROUTE_ORIGIN = "India"
+_ROUTE_ORIGIN_ADJECTIVE = "Indian"
+# The generic fallback subject when no product-level category is confirmed
+# (a component-only confirmation, or an unconfirmed run) -- the lane still
+# runs; see find_route_news_signals' own docstring for why it is never
+# skipped for that reason alone.
+_ROUTE_FALLBACK_CATEGORY = "food"
+
+_ROUTE_CATEGORIES = frozenset(
+    {"import_control", "border_rejection", "trade_agreement", "consumer_alert", "unrelated"}
+)
+_ROUTE_SIGNAL_CATEGORIES = _ROUTE_CATEGORIES - {"unrelated"}
+
+_ROUTE_CATEGORY_LABELS = {
+    "import_control": "EU import control",
+    "border_rejection": "Consignments rejected at the EU border",
+    "trade_agreement": "Trade agreement development",
+    "consumer_alert": "EU consumer alert",
+}
+
+# MEASURED-STYLE ambiguity, same shape as _COMPLETION_WORDS/_ONGOING_WORDS
+# above but for a different pair: "import_control" describes a STANDING
+# RULE (checks required, certificates mandatory, listed under an official-
+# controls regulation) -- if the model's own quoted evidence instead
+# describes a SPECIFIC INCIDENT (a shipment that was actually rejected,
+# detained, destroyed, or recalled), the rule framing understates what
+# happened and the item belongs under "border_rejection" instead.
+# "border_rejection" describes something that ALREADY HAPPENED -- if the
+# quote instead uses prospective/future-policy language, it is describing a
+# planned or proposed rule, not a concluded incident, and does not belong
+# there. Neither list overlaps the additive lane's _COMPLETION_WORDS/
+# _ONGOING_WORDS -- this is a different axis (rule-vs-incident, not
+# process-vs-output) with its own vocabulary.
+_INCIDENT_WORDS = ("rejected", "detained", "destroyed", "recalled", "returned")
+_PROSPECTIVE_PHRASES = ("proposed", "plans to", "will require", "will apply", "to take effect")
+_INCIDENT_WORD_RE = re.compile(r"\b(" + "|".join(_INCIDENT_WORDS) + r")\b", re.IGNORECASE)
+_PROSPECTIVE_PHRASE_RE = re.compile(
+    r"\b(" + "|".join(p.replace(" ", r"\s+") for p in _PROSPECTIVE_PHRASES) + r")\b", re.IGNORECASE
+)
+
+
+def check_route_category_consistency(category: str, quoted_span: str) -> bool:
+    """The route-lane SIBLING of check_category_consistency -- identical
+    "reject rather than repair" shape and reasoning, but judged against
+    the route category set (see this section's own _ROUTE_CATEGORIES),
+    which check_category_consistency itself cannot do: that function
+    pattern-matches the ADDITIVE categories ("regulatory_review"/
+    "safety_opinion") by name, so calling it with "import_control"/
+    "border_rejection" would just always return True -- silently
+    disabling the check, not extending it to a new vocabulary. This
+    function exists as a separate definition instead of a change to that
+    one, per the constraint that the additive lane's check stays
+    unchanged.
+
+    False if `quoted_span` contradicts `category`: "import_control" (a
+    standing rule) whose own quoted evidence names a specific INCIDENT
+    (a shipment rejected/detained/destroyed/recalled), or
+    "border_rejection" (a concluded incident) whose own quoted evidence
+    uses PROSPECTIVE/future-policy language (proposed/plans to/will
+    require). True for "trade_agreement" and "consumer_alert", which
+    this function does not judge at all -- their definitions do not
+    share this specific rule-vs-incident ambiguity, same as market_action/
+    consumer_alert on the additive side."""
+    if category == "import_control":
+        return not _INCIDENT_WORD_RE.search(quoted_span)
+    if category == "border_rejection":
+        return not _PROSPECTIVE_PHRASE_RE.search(quoted_span)
+    return True
+
+
+_ROUTE_CLASSIFY_PROMPT_RULES = """You are classifying ONE retrieved news/press item about EU food-import \
+conditions, for a horizon-scanning feature attached to an EU food-additive compliance tool. This item is \
+about a COUNTRY-and-CATEGORY trade route ({origin} exporting {category} to the EU), not any single \
+additive. You do NOT write a summary, a headline, or any sentence of your own. You do two things only:
+
+1. Pick exactly one category from this fixed set, describing what kind of item this is:
+   - "import_control": an EU rule or control measure governing imports of this category from this \
+origin -- mandatory certificates, increased official-controls checks, a residue-limit change, listing or \
+delisting under an import-conditions regulation. Describes a STANDING RULE, in force or being introduced \
+-- not the fate of one specific shipment.
+   - "border_rejection": one or more specific consignments from this origin were rejected, detained, \
+destroyed, or recalled at an EU border or in the EU market. Describes an INCIDENT that already happened, \
+not a rule that applies going forward.
+   - "trade_agreement": a trade negotiation, agreement, tariff, or quota development between {origin} and \
+the EU affecting this category's market access -- distinct from a food-safety control measure.
+   - "consumer_alert": an EU consumer-facing food-safety alert or recall concerning products from this \
+origin in this category, already reaching (or already in) the market -- distinct from a border rejection, \
+which stops a shipment before it reaches the market.
+   - "unrelated": the item does not genuinely concern this category's EU import conditions from this \
+origin at all.
+
+2. Copy a short excerpt (one sentence or less) VERBATIM, character-for-character, from the title or \
+content given below -- as evidence for the category you picked. Do not paraphrase, summarise, combine, \
+or add a single word that is not already there. If you picked "unrelated", quoted_span must be an empty \
+string.
+
+Respond with RAW JSON ONLY, no markdown code fences, matching exactly this shape:
+{{"category": "<one of import_control|border_rejection|trade_agreement|consumer_alert|unrelated>", \
+"quoted_span": "<verbatim excerpt, or empty string if unrelated>"}}
+
+Origin: {origin}
+
+Product category: {category}
+
+Title: {title}
+
+Content: {content}
+"""
+
+
+def _build_route_classify_prompt(origin: str, category_name: str, result: SearchResult) -> str:
+    return _ROUTE_CLASSIFY_PROMPT_RULES.format(
+        origin=origin, category=category_name, title=result.title, content=result.content
+    )
+
+
+def classify_and_quote_route(
+    result: SearchResult, origin: str, category_name: str, model_id: str
+) -> tuple[str, str] | None:
+    """The route-lane SIBLING of classify_and_quote -- identical contract
+    (pick one category from a fixed set, quote a verbatim span, never
+    compose free text) and identical verification steps (verbatim-
+    substring check, then a category/quote consistency check), just
+    against the route category set and check_route_category_consistency
+    instead of the additive ones. classify_and_quote itself is NOT
+    modified -- this is a new function, not a parameterised version of
+    that one, so the additive lane's behaviour cannot be affected by
+    anything below. See this section's own module comment for why."""
+    prompt = _build_route_classify_prompt(origin, category_name, result)
+    try:
+        raw = _call_model(prompt, model_id)
+        data = json.loads(strip_markdown_fences(raw))
+        category = str(data["category"])
+        quoted_span = str(data["quoted_span"])
+    except Exception as exc:  # noqa: BLE001 -- any failure means no signal, never a crash
+        log.warning("classify_and_quote_route: model call/parse failed: %s: %s", type(exc).__name__, exc)
+        return None
+
+    if category not in _ROUTE_SIGNAL_CATEGORIES:
+        return None
+
+    if not quoted_span:
+        return None
+
+    source_text = _normalise_text(f"{result.title} {result.content}")
+    if _normalise_text(quoted_span) not in source_text:
+        log.warning("classify_and_quote_route: quoted_span not verbatim in source, rejecting: %r", quoted_span)
+        return None
+
+    if not check_route_category_consistency(category, quoted_span):
+        log.warning(
+            "classify_and_quote_route: quoted_span contradicts category %r, rejecting: %r", category, quoted_span
+        )
+        return None
+
+    return category, quoted_span
+
+
+def render_route_news_sentence(
+    origin: str, category_name: str, category: str, quoted_span: str, source: SearchResult
+) -> str:
+    """The ONLY sentence ever displayed for a route news item -- SAME
+    template-only construction as render_news_sentence (never model-
+    composed prose), just with an origin/category subject instead of an
+    additive name. Raises KeyError if `category` is not one of
+    _ROUTE_CATEGORY_LABELS' keys -- callers are expected to have already
+    gone through classify_and_quote_route, which never returns an
+    invalid one."""
+    label = _ROUTE_CATEGORY_LABELS[category]
+    date_part = f", {source.published_date}" if source.published_date else ""
+    return f'{origin} {category_name} exports: {label} -- "{quoted_span}" ({source.url}{date_part}).'
+
+
+def build_route_news_signal(
+    result: SearchResult,
+    origin: str,
+    category_name: str,
+    search_query: str,
+    retrieved_at: str,
+    model_id: str,
+) -> RouteNewsSignal | None:
+    """Ties classify_and_quote_route, render_route_news_sentence, and
+    check_modality_backstop (REUSED, unchanged) together into one
+    RouteNewsSignal, or None when any step refuses -- the route-lane
+    sibling of build_news_signal. severity="advisory" and affects_verdict
+    =False are hardcoded here, in THIS function's own construction, not
+    inherited or read from anywhere else -- same independence build_news_
+    signal's own docstring gives for its identical two fields; a route
+    headline must never be able to change a compliance verdict."""
+    classified = classify_and_quote_route(result, origin, category_name, model_id)
+    if classified is None:
+        return None
+    category, quoted_span = classified
+
+    sentence = render_route_news_sentence(origin, category_name, category, quoted_span, result)
+    source_text = f"{result.title} {result.content}"
+    violations = check_modality_backstop(sentence, source_text)
+    if violations:
+        log.warning(
+            "build_route_news_signal: modality backstop rejected a signal for %s/%s: %s",
+            origin,
+            category_name,
+            violations,
+        )
+        return None
+
+    return RouteNewsSignal(
+        origin=origin,
+        category_name=category_name,
+        category=category,
+        quoted_span=quoted_span,
+        source_url=result.url,
+        published_date=result.published_date.isoformat() if result.published_date else None,
+        search_query=search_query,
+        retrieved_at=retrieved_at,
+        severity="advisory",
+        affects_verdict=False,
+        flags=list(result.flags),
+    )
+
+
+# food_categories.json's refDataFoodCategoryEN names carry two defects worth
+# cleaning for a SEARCH QUERY (not display): ~2 of 155 are stored with
+# underscores instead of spaces, and 25 of 154 carry a trailing legal
+# citation inline ("Cocoa and chocolate products as covered by Directive
+# 2000/36/EC"). Duplicated from src/ui/components.py's own _CATEGORY_
+# CITATION_RE/_short_category_name rather than imported: that module is
+# UI-presentation-only (see its own DESIGN RULE) and must not be a
+# dependency of this one.
+_ROUTE_CATEGORY_CITATION_RE = re.compile(
+    r"\s+as (?:defined|covered|referred to)\s+(?:by|in)\s+(?:Directive|Regulation)\b[^,]*?(?=\s+and\b|$)",
+    re.IGNORECASE,
+)
+
+
+def _clean_route_category_name(name: str) -> str:
+    cleaned = name.replace("_", " ")
+    cleaned = _ROUTE_CATEGORY_CITATION_RE.sub("", cleaned)
+    return " ".join(cleaned.split())
+
+
+def build_route_query(category_name: str | None) -> str:
+    """ONE query for the whole screening -- "Indian {category} exports EU
+    import rules", or "Indian food exports EU import rules" when
+    `category_name` is None (no product-level category confirmed; see
+    find_route_news_signals' own docstring for why the lane still runs
+    rather than being skipped). Plain category NAME (cleaned -- see
+    _clean_route_category_name), never the fcs_code: "Indian 12.2.1
+    exports EU import rules" is not a usable search query."""
+    category = _clean_route_category_name(category_name) if category_name else _ROUTE_FALLBACK_CATEGORY
+    return f"{_ROUTE_ORIGIN_ADJECTIVE} {category} exports EU import rules"
+
+
+# One query total (not per-additive), so the per-item cap only needs to
+# bound how many of ITS OWN results get classified -- mirrors MAX_RESULTS_
+# CLASSIFIED_PER_ADDITIVE's reasoning at a smaller scale (a single query,
+# not up to MAX_ADDITIVES_PER_RUN of them), so this lane costs at most 3
+# model calls per screening, regardless of label size.
+MAX_RESULTS_CLASSIFIED_PER_ROUTE = 3
+
+
+def _route_cache_key(category_code: str | None) -> str:
+    """Keyed on the ROUTE -- origin + product category CODE (stable and
+    unique; the corresponding NAME is used for the query text, not the
+    key, since a name could theoretically be edited in the reference data
+    without the code changing) -- never on an additive or a label. Two
+    screenings of different biscuit brands sharing the same confirmed
+    category share this exact key, and therefore one cache entry. Passed
+    to news_cache.get_search_results as-is; that function performs no
+    normalisation of its own (see its docstring) -- this IS the final,
+    already-normalised key."""
+    return f"route:{_ROUTE_ORIGIN.lower()}:{category_code or 'unknown'}"
+
+
+def find_route_news_signals(
+    category_code: str | None,
+    category_name: str | None,
+    provider: SearchProvider | None,
+    cache: dict,
+    model_id: str,
+    today: date,
+) -> tuple[list[RouteNewsSignal], dict, str]:
+    """(signals, updated_cache, category_used) for the ROUTE lane -- ONE
+    query for the whole screening, about `category_name` exports from
+    India to the EU, never one per additive (see find_news_signals for
+    the additive-scoped sibling this deliberately does NOT merge with --
+    both write to separate HorizonResult fields; see RouteNewsSignal's
+    own docstring for why). `category_used` (the resolved category name,
+    or the "food" fallback) is returned alongside the signals -- even
+    when `signals` is empty -- so the caller can still say WHAT was
+    searched instead of rendering nothing (see src/ui/components.py).
+
+    `category_code`/`category_name` are None when no product-level
+    category is confirmed (a component-only confirmation, or an
+    unconfirmed run) -- the lane still runs, with build_route_query's own
+    generic fallback, never skipped for that reason: a route
+    consideration for "Indian food exports" is still real advisory
+    information even without a confirmed sub-category.
+
+    Degrades to ([], cache, category_used) when `provider` is None --
+    same "not a silent no-op, but also not a crash" contract as find_
+    news_signals; a search failure (exception from get_search_results)
+    degrades the SAME way rather than propagating, since one lane's
+    search failing must not break the additive lane or the whole run --
+    logged, not raised.
+
+    No is_relevant()-style keyword prefilter here -- unlike an additive
+    name (a precise token to match against), a category phrase ("spices",
+    "flavoured drinks") is too generic to gate on cheaply without risking
+    false negatives; classify_and_quote_route's own "unrelated" category
+    is the real topical filter for this lane. meets_score_threshold
+    (Tavily's own relevance score) IS still applied -- score quality is
+    not an additive-specific concept.
+    """
+    category_used = _clean_route_category_name(category_name) if category_name else _ROUTE_FALLBACK_CATEGORY
+    query = build_route_query(category_name)
+    if provider is None:
+        return [], cache, category_used
+
+    def _fetch():
+        return provider.search(query, include_domains=list(_INCLUDE_DOMAINS), days=_DEFAULT_DAYS)
+
+    cache_key = _route_cache_key(category_code)
+    try:
+        raw_results, updated_cache, cache_flags = get_search_results(cache, cache_key, _fetch, today)
+    except Exception as exc:  # noqa: BLE001 -- a route search failing must not break the additive lane or the run
+        log.warning("find_route_news_signals: search failed, skipping: %s: %s", type(exc).__name__, exc)
+        return [], cache, category_used
+
+    validated = [validate_search_result(r) for r in raw_results]
+    candidates = [r for r in validated if meets_score_threshold(r)]
+    candidates = candidates[:MAX_RESULTS_CLASSIFIED_PER_ROUTE]
+
+    signals: list[RouteNewsSignal] = []
+    for result in candidates:
+        signal = build_route_news_signal(result, _ROUTE_ORIGIN, category_used, query, today.isoformat(), model_id)
+        if signal is None:
+            continue
+        if cache_flags:
+            signal = signal.model_copy(update={"flags": signal.flags + list(cache_flags)})
+        signals.append(signal)
+
+    return signals, updated_cache, category_used

@@ -45,6 +45,19 @@ class PipelineState(TypedDict):
     # schemas.py's news_signals field) where the graph's output is
     # actually consumed for display (app.py), not inside the graph itself.
     news_signals: list | None
+    # ROUTE-scoped news -- a FOURTH parallel-branch output, written by the
+    # SAME news_node as news_signals above (one query about the confirmed
+    # product category exporting from India, not per-additive; see
+    # src/horizon/news.py's ROUTE-SCOPED NEWS section) but kept as its own
+    # key rather than folded into news_signals, for the identical reason
+    # news_signals itself is not folded into "horizon": a route item has
+    # no eu_canonical_id, so mixing the two lists would mean code written
+    # for one silently having to handle the other's shape too. route_news_
+    # category is the plain category name (or "food") this run's ONE
+    # route query actually used -- kept even when route_news_signals is
+    # empty so the UI can still say WHAT was searched.
+    route_news_signals: list | None
+    route_news_category: str | None
     narration: dict | None
     # Populated by a node's own try/except, never by an uncaught exception
     # propagating out of a node -- see each node's docstring in nodes.py.

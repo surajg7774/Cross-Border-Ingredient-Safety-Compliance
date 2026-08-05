@@ -217,6 +217,8 @@ def _graph_initial_state(
         "substitutes": None,
         "horizon": None,
         "news_signals": None,
+        "route_news_signals": None,
+        "route_news_category": None,
         "narration": None,
         "errors": [],
     }
@@ -432,14 +434,20 @@ def _finalise_graph(choices: dict[str | None, CategoryCandidate]) -> None:
 
     st.session_state.verdict = verdict
     st.session_state.preview_verdict = preview_verdict
-    # state["horizon"] (horizon_node, EFSA-only) and state["news_signals"]
-    # (news_node) are SEPARATE graph state keys -- see src/graph/nodes.py's
+    # state["horizon"] (horizon_node, EFSA-only), state["news_signals"],
+    # and state["route_news_signals"]/state["route_news_category"] (all
+    # news_node) are SEPARATE graph state keys -- see src/graph/nodes.py's
     # make_news_node docstring for why -- combined into one HorizonResult
     # here, the one place the graph's output is actually consumed for
     # display. `or []` covers news_node's "provider is None" degrade path
-    # (returns {"news_signals": []} already) and the case where the key
-    # was never set at all -- both mean "no news signals", never an error.
-    horizon_dict = {**(result["horizon"] or {}), "news_signals": result.get("news_signals") or []}
+    # (returns the empty-list shape already) and the case where a key was
+    # never set at all -- both mean "no signals", never an error.
+    horizon_dict = {
+        **(result["horizon"] or {}),
+        "news_signals": result.get("news_signals") or [],
+        "route_news_signals": result.get("route_news_signals") or [],
+        "route_news_category": result.get("route_news_category"),
+    }
     st.session_state.horizon_result = HorizonResult.model_validate(horizon_dict)
     st.session_state.substitute_result = SubstituteResult.model_validate(result["substitutes"])
     st.session_state.narration = Narration.model_validate(result["narration"])

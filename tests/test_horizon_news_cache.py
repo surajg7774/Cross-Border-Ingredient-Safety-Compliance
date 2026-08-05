@@ -7,7 +7,13 @@ from datetime import date
 
 import pytest
 
-from src.horizon.news_cache import TTL_DAYS, get_search_results, load_cache, save_cache
+from src.horizon.news_cache import (
+    TTL_DAYS,
+    get_search_results,
+    load_cache,
+    normalise_additive_identity,
+    save_cache,
+)
 from src.horizon.search import SearchResult
 
 
@@ -57,17 +63,33 @@ def test_cache_miss_calls_fetch_and_stores_results():
     assert updated_cache["955"]["fetched_at"] == "2026-08-04"
 
 
-def test_cache_key_is_normalised_additive_identity():
+def test_normalise_additive_identity_collapses_e_number_variants():
+    # get_search_results itself no longer normalises (see its own
+    # docstring) -- this is now the CALLER's transform, applied once
+    # before building a cache key. src/horizon/news.py's find_news_signals
+    # calls this directly for the additive lane.
+    for raw_id in ("E 955", "E955", "955"):
+        assert normalise_additive_identity(raw_id) == "955"
+
+
+def test_get_search_results_uses_the_cache_key_exactly_as_given():
+    # No normalisation happens inside get_search_results -- a key that
+    # differs even by an "E " prefix is a DIFFERENT cache entry, proving
+    # the additive-identity transform really did move to the caller.
     entry = _cache_entry("2026-08-01", [_result()])
     cache = {"955": entry}
+    fetch_calls = []
 
     def fetch():
-        raise AssertionError("fetch should not be called -- E 955 must normalise to the same key as 955")
+        fetch_calls.append(1)
+        return [_result(url="https://example.com/fresh")]
 
-    for raw_id in ("E 955", "E955", "955"):
-        results, _cache, flags = get_search_results(cache, raw_id, fetch, today=date(2026, 8, 3))
-        assert results == [_result()]
-        assert flags == []
+    results, updated_cache, _flags = get_search_results(cache, "E 955", fetch, today=date(2026, 8, 3))
+
+    assert len(fetch_calls) == 1  # "E 955" != "955" -- a cache MISS, not a hit
+    assert results == [_result(url="https://example.com/fresh")]
+    assert "E 955" in updated_cache
+    assert "955" in updated_cache  # the original entry is untouched, not overwritten
 
 
 def test_fresh_cache_hit_never_calls_fetch():

@@ -492,6 +492,119 @@ def test_horizon_news_signal_flags_render_as_a_warning_badge():
     assert "eu-badge warn" in markdown_html
 
 
+# ---- Route news signals (India -> EU, whole-category) -------------------
+
+_ROUTE_NEWS_SIGNAL = {
+    "origin": "India",
+    "category_name": "Herbs and spices",
+    "category": "import_control",
+    "quoted_span": "the EU has increased official controls on Indian spice consignments",
+    "source_url": "https://ec.europa.eu/example-route",
+    "published_date": "2026-05-01",
+    "search_query": "Indian Herbs and spices exports EU import rules",
+    "retrieved_at": "2026-08-04",
+    "severity": "advisory",
+    "affects_verdict": False,
+    "flags": [],
+}
+
+
+def test_route_news_renders_nothing_when_lane_never_ran():
+    # route_news_category is None -- the lane never touched this
+    # HorizonResult at all (e.g. the legacy non-graph fallback path, or a
+    # provider that was never configured before the field existed).
+    result = {"signals": [], "checked_ids": [], "warnings": [], "data_version": "test", "data_retrieved": None}
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "Import route" not in markdown_html
+
+
+def test_route_news_shows_what_was_searched_when_nothing_found():
+    # The lane RAN (route_news_category is set) but found nothing -- must
+    # still say what was searched, not render an absent section.
+    result = {
+        "signals": [],
+        "checked_ids": [],
+        "warnings": [],
+        "data_version": "test",
+        "data_retrieved": None,
+        "route_news_signals": [],
+        "route_news_category": "Herbs and spices",
+    }
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "Import route" in markdown_html
+    captions = [c.value for c in at.caption]
+    assert "No recent EU news found about Herbs and spices exports from India in this category." in captions
+
+
+def test_route_news_renders_a_signal_with_quote_source_and_category_label():
+    result = {
+        "signals": [],
+        "checked_ids": [],
+        "warnings": [],
+        "data_version": "test",
+        "data_retrieved": None,
+        "route_news_signals": [_ROUTE_NEWS_SIGNAL],
+        "route_news_category": "Herbs and spices",
+    }
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+
+    assert "Import route: India" in markdown_html
+    assert "never about one specific additive" in markdown_html
+    assert "the EU has increased official controls on Indian spice consignments" in markdown_html
+    assert "https://ec.europa.eu/example-route" in markdown_html
+    assert "2026-05-01" in markdown_html
+    assert "EU import control" in markdown_html  # the category label
+    assert "India" in markdown_html and "Herbs and spices" in markdown_html
+    # NEVER an eu_canonical_id/E-number -- a route signal is not about one additive.
+    assert "eu_canonical_id" not in markdown_html
+
+
+def test_route_news_flags_render_as_a_warning_badge():
+    flagged_signal = {**_ROUTE_NEWS_SIGNAL, "flags": ["stale_cache_served"]}
+    result = {
+        "signals": [],
+        "checked_ids": [],
+        "warnings": [],
+        "data_version": "test",
+        "data_retrieved": None,
+        "route_news_signals": [flagged_signal],
+        "route_news_category": "Herbs and spices",
+    }
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    assert "stale_cache_served" in markdown_html
+    assert "eu-badge warn" in markdown_html
+
+
+def test_route_news_and_additive_news_render_as_visually_distinct_sections():
+    result = {
+        "signals": [],
+        "checked_ids": [],
+        "warnings": [],
+        "data_version": "test",
+        "data_retrieved": None,
+        "news_signals": [_NEWS_SIGNAL],
+        "route_news_signals": [_ROUTE_NEWS_SIGNAL],
+        "route_news_category": "Herbs and spices",
+    }
+    at = AppTest.from_string(_render_horizon_script(result)).run()
+    assert not at.exception
+    markdown_html = "\n".join(m.value for m in at.markdown)
+    # Two separate section titles -- a reader is never left to guess which
+    # section a given item belongs to.
+    assert "Regulatory horizon" in markdown_html
+    assert "Import route: India" in markdown_html
+    assert "Titanium dioxide" in markdown_html  # the additive-scoped signal
+    assert "Herbs and spices" in markdown_html  # the route-scoped signal
+
+
 def test_horizon_efsa_table_and_news_signals_both_render_and_stay_distinct():
     result = {
         "signals": [

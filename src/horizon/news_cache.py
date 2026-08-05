@@ -13,23 +13,31 @@
 SearchProvider.search() call returns, so a cache hit skips the search
 call itself, before relevance filtering or classification ever run.
 Caching happens here, not in src/horizon/news.py, because the same
-additive's news doesn't change just because a different model classified
-it differently on a later run -- only the underlying search results are
-worth remembering.
+additive's (or route's) news doesn't change just because a different
+model classified it differently on a later run -- only the underlying
+search results are worth remembering.
 
-KEYED ON NORMALISED ADDITIVE IDENTITY -- never on label or item_id. See
-src/horizon/schemas.py's own module DESIGN RULE: this stage operates on
-additive identity, not per-label items, because the same additive
-(silicon dioxide, citric acid, ...) recurs across many different labels,
-and news about it doesn't change per label. A per-label or per-item_id
-cache key would mean re-searching the identical additive every time it
-appears on a different product -- exactly the quota waste identity-keyed
-caching exists to avoid.
+KEYED ON CALLER-SUPPLIED, ALREADY-NORMALISED IDENTITY -- never on label
+or item_id, and never RE-normalised here (get_search_results takes
+`cache_key` as-is; see its own docstring for why the normalisation step
+moved to each caller). The additive lane (src/horizon/news.py's find_
+news_signals) keys on normalised additive identity -- see src/horizon/
+schemas.py's own module DESIGN RULE: this stage operates on additive
+identity, not per-label items, because the same additive (silicon
+dioxide, citric acid, ...) recurs across many different labels, and news
+about it doesn't change per label. The route lane (find_route_news_
+signals) keys on origin + product category instead, for the identical
+reason at a different grain: two screenings of different biscuit brands
+in the SAME confirmed category share one cache entry. Either way, a
+per-label or per-item_id cache key would mean re-searching identical
+ground every time it recurs on a different product -- exactly the quota
+waste identity-keyed caching exists to avoid.
 
-TTL: 7 days. Regulatory news is not real-time -- an EFSA review runs
-months to years, RASFF alerts for a specific additive are infrequent,
-trade press doesn't publish multiple substance-specific pieces a day. A
-7-day window costs essentially no signal a user would act on.
+TTL: 7 days, for BOTH lanes -- regulatory and trade news are not real-
+time -- an EFSA review runs months to years, RASFF alerts for a specific
+additive are infrequent, trade press doesn't publish multiple pieces a
+day about one import route. A 7-day window costs essentially no signal a
+user would act on.
 
 STALE-SERVE: when the provider call fails (network error, exhausted
 quota) and a cache entry exists but is past its TTL, that stale entry is
@@ -49,12 +57,22 @@ TTL_DAYS = 7
 _STALE_SERVED_FLAG = "stale_cache_served"
 
 
-def _normalise_identity(raw: str) -> str:
+def normalise_additive_identity(raw: str) -> str:
     """'E 955' -> '955', 'INS 470(i)' -> '470(i)' -- identical to
     src/horizon/lane.py's _normalise_id (itself duplicated from
     src/resolve/resolver.py's _normalise_code), duplicated here rather
     than imported for the same independent-pure-module reason lane.py's
-    own docstring gives for its copy."""
+    own docstring gives for its copy.
+
+    PUBLIC (no leading underscore), and NOT called inside get_search_
+    results below -- this is an ADDITIVE-shaped transform (it strips a
+    leading "e"/"ins", which would mangle a non-additive key, e.g. a
+    route key starting with "EU"), so it is the caller's job to apply it
+    before building a cache key, not get_search_results'. src/horizon/
+    news.py's find_news_signals calls this directly for the additive
+    lane; find_route_news_signals builds its own, differently-shaped key
+    instead (see that function's own docstring) -- get_search_results
+    itself no longer knows or cares which shape a caller used."""
     text = raw.lower().replace(" ", "")
     if text.startswith("ins"):
         return text[3:]
@@ -114,12 +132,22 @@ def _age_days(fetched_at: str, today: date) -> int:
 
 def get_search_results(
     cache: dict,
-    additive_id: str,
+    cache_key: str,
     fetch,
     today: date,
     ttl_days: int = TTL_DAYS,
 ) -> tuple[list[SearchResult], dict, list[str]]:
-    """(results, updated_cache, flags) for `additive_id`.
+    """(results, updated_cache, flags) for `cache_key`.
+
+    `cache_key` is used EXACTLY as given, no normalisation applied here --
+    this function is generic cache mechanics (TTL/stale-serve/dict shape),
+    not additive-specific. The additive lane (src/horizon/news.py's
+    find_news_signals) normalises its own key first via news_cache.
+    normalise_additive_identity ('E 955' -> '955'); the route lane
+    (find_route_news_signals) builds a differently-shaped key of its own
+    (origin + product category, never an additive identity) -- neither
+    transform belongs in this shared function, which would otherwise have
+    to guess which shape a given caller's key was in.
 
     A cache entry within `ttl_days` is returned as-is, no `fetch` call --
     the whole point of the cache. A MISSING or EXPIRED entry calls
@@ -139,8 +167,7 @@ def get_search_results(
     write, the input is left untouched, so a caller controls exactly when
     (or whether) to persist it via save_cache.
     """
-    key = _normalise_identity(additive_id)
-    entry = cache.get(key)
+    entry = cache.get(cache_key)
     is_fresh = entry is not None and _age_days(entry["fetched_at"], today) <= ttl_days
 
     if is_fresh:
@@ -154,5 +181,5 @@ def get_search_results(
         raise
 
     updated_cache = dict(cache)
-    updated_cache[key] = {"fetched_at": today.isoformat(), "results": _serialise(results)}
+    updated_cache[cache_key] = {"fetched_at": today.isoformat(), "results": _serialise(results)}
     return results, updated_cache, []

@@ -86,6 +86,36 @@ class NewsSignal(BaseModel):
     flags: list[str] = Field(default_factory=list)
 
 
+class RouteNewsSignal(BaseModel):
+    """One retrieved-and-classified news item about an EU IMPORT ROUTE --
+    an origin country and a product category, not any single additive.
+    Sibling to NewsSignal (src/horizon/news.py's find_route_news_signals
+    vs. find_news_signals), same two invariants (severity is always
+    "advisory", affects_verdict is always False -- a trade headline never
+    changes an Annex II verdict), but keyed by origin/category_name
+    instead of eu_canonical_id/substance_name: a headline like "EU
+    tightens checks on Indian spice imports" attaches to the PRODUCT and
+    the COUNTRY, not to any single additive, so it cannot hang off
+    eu_canonical_id the way NewsSignal does. See src/horizon/news.py's
+    ROUTE-SCOPED NEWS section for the full mechanism -- same classify-
+    and-quote discipline as NewsSignal (the model picks a category and
+    quotes a verbatim span; it never composes the displayed sentence),
+    just against a route-shaped category set instead of the additive one.
+    """
+
+    origin: str  # "India" -- a fixed constant in code (src/horizon/news.py's _ROUTE_ORIGIN), not user input
+    category_name: str  # the confirmed product category's plain name, or "food" as the no-category fallback
+    category: Literal["import_control", "border_rejection", "trade_agreement", "consumer_alert"]
+    quoted_span: str  # verbatim substring of the retrieved title+content
+    source_url: str
+    published_date: str | None
+    search_query: str  # the query that retrieved this item -- provenance, not shown as-is to the reader
+    retrieved_at: str
+    severity: Literal["advisory"]
+    affects_verdict: bool
+    flags: list[str] = Field(default_factory=list)
+
+
 class HorizonResult(BaseModel):
     signals: list[HorizonSignal]
     checked_ids: list[str]  # which additives were looked up
@@ -101,3 +131,15 @@ class HorizonResult(BaseModel):
     # completely valid HorizonResult, degrading to "no news signals"
     # rather than failing to construct.
     news_signals: list[NewsSignal] = Field(default_factory=list)
+    # ROUTE-scoped news -- a THIRD, separate source again (see
+    # RouteNewsSignal's own docstring), never merged into `news_signals`:
+    # a route item has no eu_canonical_id to carry, so folding it into
+    # that list would mean making the field optional there, which would
+    # let a route item silently pass through code written only for
+    # additive-scoped signals. route_news_category is the plain category
+    # name (or "food") this run's ONE route query actually used, kept
+    # even when route_news_signals is empty so the UI can still say WHAT
+    # was searched ("no recent EU news about spice exports from India")
+    # instead of rendering nothing -- see src/ui/components.py.
+    route_news_signals: list[RouteNewsSignal] = Field(default_factory=list)
+    route_news_category: str | None = None

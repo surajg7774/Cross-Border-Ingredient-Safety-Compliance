@@ -13,20 +13,27 @@ from src.horizon import news as news_module
 from src.horizon.news import (
     MAX_ADDITIVES_PER_RUN,
     MAX_RESULTS_CLASSIFIED_PER_ADDITIVE,
+    MAX_RESULTS_CLASSIFIED_PER_ROUTE,
     NEWS_INITIAL_BACKOFF_SECONDS,
     NEWS_MAX_BACKOFF_SECONDS,
     NEWS_MAX_RETRIES,
     build_news_signal,
+    build_route_news_signal,
+    build_route_query,
     check_category_consistency,
     check_modality_backstop,
+    check_route_category_consistency,
     classify_and_quote,
+    classify_and_quote_route,
     find_news_signals,
+    find_route_news_signals,
     is_relevant,
     meets_score_threshold,
     passes_prefilter,
     render_news_sentence,
+    render_route_news_sentence,
 )
-from src.horizon.schemas import NewsSignal
+from src.horizon.schemas import NewsSignal, RouteNewsSignal
 from src.horizon.search import FixtureSearchProvider, SearchResult
 
 
@@ -624,3 +631,404 @@ def test_news_retry_budget_is_smaller_than_the_extraction_paths():
     from src.extractors.gemini import MAX_RATE_LIMIT_RETRIES as EXTRACTION_MAX_RETRIES
 
     assert NEWS_MAX_RETRIES < EXTRACTION_MAX_RETRIES
+
+
+# =========================================================================== #
+# ROUTE-SCOPED NEWS -- India -> EU, one query per screening, never per
+# additive. Same monkeypatched-_call_model discipline as the additive tests
+# above; nothing here calls a real model or a real SearchProvider either.
+# =========================================================================== #
+def _route_result(
+    title="EU tightens checks on Indian spice imports",
+    content="Officials say checks on Indian spice consignments have increased.",
+    **overrides,
+):
+    base = {
+        "title": title,
+        "url": "https://ec.europa.eu/example-route",
+        "content": content,
+        "published_date": date(2026, 5, 1),
+        "published_date_raw": "Fri, 01 May 2026 00:00:00 GMT",
+        "score": 0.9,
+        "flags": [],
+    }
+    base.update(overrides)
+    return SearchResult(**base)
+
+
+# --------------------------------------------------------------------------- #
+# build_route_query -- pure
+# --------------------------------------------------------------------------- #
+def test_build_route_query_uses_the_plain_category_name():
+    assert build_route_query("Herbs and spices") == "Indian Herbs and spices exports EU import rules"
+
+
+def test_build_route_query_falls_back_to_a_generic_food_query():
+    # Never skipped when no product-level category is confirmed.
+    assert build_route_query(None) == "Indian food exports EU import rules"
+
+
+def test_build_route_query_cleans_underscores_and_citation_clauses():
+    # MEASURED (data/reference/food_categories.json): some category names
+    # are stored with underscores instead of spaces, and 25 of 154 carry a
+    # trailing legal citation -- neither belongs in a search query.
+    assert build_route_query("Flavoured_drinks") == "Indian Flavoured drinks exports EU import rules"
+    assert build_route_query("Cocoa and chocolate products as covered by Directive 2000/36/EC") == (
+        "Indian Cocoa and chocolate products exports EU import rules"
+    )
+
+
+def test_build_route_query_never_uses_a_bare_fcs_code():
+    query = build_route_query("Herbs and spices")
+    assert "12.2.1" not in query
+
+
+# --------------------------------------------------------------------------- #
+# check_route_category_consistency -- pure
+# --------------------------------------------------------------------------- #
+def test_route_consistency_rejects_import_control_quoting_an_incident():
+    assert check_route_category_consistency("import_control", "the shipment was rejected at the border") is False
+    assert check_route_category_consistency("import_control", "consignments were destroyed on arrival") is False
+
+
+def test_route_consistency_rejects_border_rejection_quoting_a_future_plan():
+    assert check_route_category_consistency("border_rejection", "the EU proposed new rules for spice imports") is False
+    assert check_route_category_consistency("border_rejection", "checks will apply from January 2027") is False
+
+
+def test_route_consistency_allows_matching_pairs():
+    assert check_route_category_consistency("import_control", "official checks have been increased") is True
+    assert check_route_category_consistency("border_rejection", "the shipment was rejected at the border") is True
+
+
+def test_route_consistency_does_not_judge_other_categories():
+    assert check_route_category_consistency("trade_agreement", "the shipment was rejected at the border") is True
+    assert check_route_category_consistency("consumer_alert", "the EU proposed new rules") is True
+
+
+# --------------------------------------------------------------------------- #
+# classify_and_quote_route -- monkeypatched model call, no network
+# --------------------------------------------------------------------------- #
+def test_classify_and_quote_route_accepts_a_verbatim_quote(monkeypatch):
+    result = _route_result()
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("import_control", "checks on Indian spice consignments have increased"),
+    )
+
+    classified = classify_and_quote_route(result, "India", "Herbs and spices", "fake-model")
+
+    assert classified == ("import_control", "checks on Indian spice consignments have increased")
+
+
+def test_classify_and_quote_route_rejects_a_non_verbatim_quote(monkeypatch):
+    result = _route_result()
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("import_control", "spices will soon be banned entirely"),
+    )
+    assert classify_and_quote_route(result, "India", "Herbs and spices", "fake-model") is None
+
+
+def test_classify_and_quote_route_returns_none_for_unrelated(monkeypatch):
+    result = _route_result()
+    monkeypatch.setattr(news_module, "_call_model", lambda prompt, model_id: _mock_response("unrelated", ""))
+    assert classify_and_quote_route(result, "India", "Herbs and spices", "fake-model") is None
+
+
+def test_classify_and_quote_route_returns_none_for_an_additive_category(monkeypatch):
+    # "regulatory_review"/"safety_opinion" are the ADDITIVE lane's
+    # categories, not valid route categories -- proves the two category
+    # sets are genuinely separate, not just differently labelled.
+    result = _route_result()
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("regulatory_review", "checks on Indian spice consignments have increased")
+    )
+    assert classify_and_quote_route(result, "India", "Herbs and spices", "fake-model") is None
+
+
+def test_classify_and_quote_route_rejects_a_category_contradicted_by_its_own_quote(monkeypatch):
+    # MEASURED-STYLE case this exists to catch: "import_control" badged
+    # over a quote that is actually about a specific rejected shipment.
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("import_control", "the consignment was rejected at the border"),
+    )
+    result = _route_result(content="the consignment was rejected at the border after failing checks")
+    assert classify_and_quote_route(result, "India", "Herbs and spices", "fake-model") is None
+
+
+def test_classify_and_quote_route_returns_none_on_malformed_json(monkeypatch):
+    result = _route_result()
+    monkeypatch.setattr(news_module, "_call_model", lambda prompt, model_id: "not json at all")
+    assert classify_and_quote_route(result, "India", "Herbs and spices", "fake-model") is None
+
+
+def test_classify_and_quote_route_does_not_affect_the_additive_lane(monkeypatch):
+    # classify_and_quote itself is untouched -- calling the route sibling
+    # never routes through it or shares any mutable state with it.
+    result = _result()
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("regulatory_review", "EFSA opens review")
+    )
+    assert classify_and_quote(result, "Titanium dioxide", "fake-model") == ("regulatory_review", "EFSA opens review")
+
+
+# --------------------------------------------------------------------------- #
+# render_route_news_sentence -- pure
+# --------------------------------------------------------------------------- #
+def test_render_route_news_sentence_includes_quote_url_date_and_origin():
+    result = _route_result(published_date=date(2026, 5, 1))
+    sentence = render_route_news_sentence("India", "Herbs and spices", "import_control", "checks increased", result)
+    assert "checks increased" in sentence
+    assert result.url in sentence
+    assert "2026-05-01" in sentence
+    assert "EU import control" in sentence
+    assert "India" in sentence and "Herbs and spices" in sentence
+
+
+def test_render_route_news_sentence_omits_date_when_absent():
+    result = _route_result(published_date=None, published_date_raw=None)
+    sentence = render_route_news_sentence("India", "Herbs and spices", "import_control", "checks increased", result)
+    assert "None" not in sentence
+
+
+# --------------------------------------------------------------------------- #
+# build_route_news_signal -- ties everything together
+# --------------------------------------------------------------------------- #
+def test_build_route_news_signal_happy_path(monkeypatch):
+    result = _route_result(flags=["no_published_date"])
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("import_control", "checks on Indian spice consignments have increased"),
+    )
+
+    signal = build_route_news_signal(
+        result, "India", "Herbs and spices", "Indian Herbs and spices exports EU import rules", "2026-08-04", "fake-model"
+    )
+
+    assert isinstance(signal, RouteNewsSignal)
+    assert signal.origin == "India"
+    assert signal.category_name == "Herbs and spices"
+    assert signal.category == "import_control"
+    assert signal.quoted_span == "checks on Indian spice consignments have increased"
+    assert signal.source_url == result.url
+    assert signal.search_query == "Indian Herbs and spices exports EU import rules"
+    assert signal.retrieved_at == "2026-08-04"
+    assert signal.flags == ["no_published_date"]
+
+
+def test_build_route_news_signal_none_when_classification_rejects(monkeypatch):
+    monkeypatch.setattr(news_module, "_call_model", lambda prompt, model_id: _mock_response("unrelated", ""))
+    signal = build_route_news_signal(_route_result(), "India", "Herbs and spices", "q", "2026-08-04", "fake-model")
+    assert signal is None
+
+
+def test_build_route_news_signal_none_on_modality_backstop_violation(monkeypatch):
+    # Forced via the FIXED TEMPLATE, same proof-of-wiring shape as the
+    # additive lane's own test_build_news_signal_none_on_modality_
+    # backstop_violation -- check_modality_backstop is REUSED, unchanged.
+    monkeypatch.setitem(news_module._ROUTE_CATEGORY_LABELS, "import_control", "This category may soon be banned")
+    result = _route_result(title="EU tightens checks", content="Routine control update.")
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("import_control", "EU tightens checks")
+    )
+
+    signal = build_route_news_signal(result, "India", "Herbs and spices", "q", "2026-08-04", "fake-model")
+
+    assert signal is None
+
+
+def test_route_news_signal_affects_verdict_is_always_false(monkeypatch):
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("border_rejection", "consignments were rejected"),
+    )
+    result = _route_result(
+        title="Indian spice consignments rejected", content="EU border officials say consignments were rejected."
+    )
+    signal = build_route_news_signal(result, "India", "Herbs and spices", "q", "2026-08-04", "fake-model")
+    assert signal.affects_verdict is False
+
+
+def test_route_news_signal_severity_is_always_advisory(monkeypatch):
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("import_control", "checks on Indian spice consignments have increased"),
+    )
+    signal = build_route_news_signal(_route_result(), "India", "Herbs and spices", "q", "2026-08-04", "fake-model")
+    assert signal.severity == "advisory"
+
+
+# --------------------------------------------------------------------------- #
+# find_route_news_signals -- FixtureSearchProvider or a counting test
+# double, never a real network call.
+# --------------------------------------------------------------------------- #
+def test_find_route_news_signals_returns_empty_unchanged_when_provider_is_none():
+    cache = {"sentinel": "value"}
+    signals, updated_cache, category = find_route_news_signals(
+        "12.2.1", "Herbs and spices", None, cache, "fake-model", date(2026, 8, 4)
+    )
+    assert signals == []
+    assert updated_cache is cache
+    assert category == "Herbs and spices"  # still resolved, even though nothing ran
+
+
+def test_find_route_news_signals_happy_path(monkeypatch):
+    query = build_route_query("Herbs and spices")
+    provider = FixtureSearchProvider({query: [_route_result()]})
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("import_control", "checks on Indian spice consignments have increased"),
+    )
+
+    signals, updated_cache, category = find_route_news_signals(
+        "12.2.1", "Herbs and spices", provider, {}, "fake-model", date(2026, 8, 4)
+    )
+
+    assert len(signals) == 1
+    assert signals[0].category == "import_control"
+    assert category == "Herbs and spices"
+    assert "route:india:12.2.1" in updated_cache  # namespaced, never collides with an additive id
+
+
+def test_find_route_news_signals_falls_back_to_generic_query_when_uncategorised(monkeypatch):
+    query = build_route_query(None)
+    provider = FixtureSearchProvider({query: [_route_result()]})
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("import_control", "checks on Indian spice consignments have increased"),
+    )
+
+    signals, updated_cache, category = find_route_news_signals(
+        None, None, provider, {}, "fake-model", date(2026, 8, 4)
+    )
+
+    assert len(signals) == 1  # the lane still ran -- never skipped for lacking a confirmed category
+    assert category == "food"
+    assert "route:india:unknown" in updated_cache
+
+
+def test_find_route_news_signals_search_failure_degrades_instead_of_raising(monkeypatch):
+    # A route search failing must not break the additive lane or the run
+    # -- degrades to empty, same discipline find_news_signals applies per
+    # additive, just for the whole (single) route query here.
+    class _RaisingProvider:
+        def search(self, q, *, include_domains=None, days=None):
+            raise RuntimeError("Tavily quota exhausted")
+
+    signals, updated_cache, category = find_route_news_signals(
+        "12.2.1", "Herbs and spices", _RaisingProvider(), {}, "fake-model", date(2026, 8, 4)
+    )
+    assert signals == []
+    assert updated_cache == {}
+    assert category == "Herbs and spices"
+
+
+def test_find_route_news_signals_caps_results_classified(monkeypatch):
+    query = build_route_query("Herbs and spices")
+    provider = FixtureSearchProvider(
+        {query: [_route_result(url=f"https://ec.europa.eu/example-{i}") for i in range(6)]}
+    )
+    calls = {"n": 0}
+
+    def _counting_call_model(prompt, model_id):
+        calls["n"] += 1
+        return _mock_response("import_control", "checks on Indian spice consignments have increased")
+
+    monkeypatch.setattr(news_module, "_call_model", _counting_call_model)
+    find_route_news_signals("12.2.1", "Herbs and spices", provider, {}, "fake-model", date(2026, 8, 4))
+
+    assert calls["n"] == MAX_RESULTS_CLASSIFIED_PER_ROUTE
+
+
+def test_find_route_news_signals_reuses_the_cache_on_a_second_screening_of_a_different_product(monkeypatch):
+    # Two screenings of different biscuit brands, SAME confirmed category
+    # -- must share one cache entry, never re-search.
+    query = build_route_query("Biscuits")
+    provider = _CountingProvider({query: [_route_result()]})
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("import_control", "checks on Indian spice consignments have increased")
+    )
+
+    _signals_a, cache_after_first, _category = find_route_news_signals(
+        "7.2", "Biscuits", provider, {}, "fake-model", date(2026, 8, 4)
+    )
+    find_route_news_signals("7.2", "Biscuits", provider, cache_after_first, "fake-model", date(2026, 8, 4))
+
+    assert provider.calls == [query]  # the SECOND screening never called search() again
+
+
+def test_find_route_news_signals_stale_serve_flag_carries_onto_signals(monkeypatch):
+    query = build_route_query("Herbs and spices")
+    stale_cache = {
+        "route:india:12.2.1": {
+            "fetched_at": "2026-01-01",  # well past the 7-day TTL
+            "results": [
+                {
+                    "title": "EU tightens checks on Indian spice imports",
+                    "url": "https://ec.europa.eu/example-route",
+                    "content": "Officials say checks on Indian spice consignments have increased.",
+                    "published_date": "2026-05-01",
+                    "published_date_raw": "Fri, 01 May 2026 00:00:00 GMT",
+                    "score": 0.9,
+                    "flags": [],
+                }
+            ],
+        }
+    }
+    provider = _CountingProvider(raise_for={query})  # provider is down -- forces a stale-serve
+    monkeypatch.setattr(
+        news_module, "_call_model", lambda prompt, model_id: _mock_response("import_control", "checks on Indian spice consignments have increased")
+    )
+
+    signals, _cache, _category = find_route_news_signals(
+        "12.2.1", "Herbs and spices", provider, stale_cache, "fake-model", date(2026, 8, 4)
+    )
+
+    assert len(signals) == 1
+    assert "stale_cache_served" in signals[0].flags
+
+
+def test_route_lane_shares_no_module_state_with_additive_lane(monkeypatch):
+    # find_route_news_signals and find_news_signals must be independently
+    # callable in the same run without interfering -- proves the shared
+    # cache dict is genuinely namespace-safe (additive ids vs "route:...").
+    additive_query = news_module._build_query("Titanium dioxide")
+    route_query = build_route_query("Herbs and spices")
+    provider = FixtureSearchProvider(
+        {
+            additive_query: [_result()],
+            route_query: [_route_result()],
+        }
+    )
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("regulatory_review", "EFSA opens review"),
+    )
+
+    additive_signals, cache = find_news_signals(
+        ["171"], provider, {}, "fake-model", date(2026, 8, 4), additive_names={"171": "Titanium dioxide"}
+    )
+    monkeypatch.setattr(
+        news_module,
+        "_call_model",
+        lambda prompt, model_id: _mock_response("import_control", "checks on Indian spice consignments have increased"),
+    )
+    route_signals, cache, _category = find_route_news_signals(
+        "12.2.1", "Herbs and spices", provider, cache, "fake-model", date(2026, 8, 4)
+    )
+
+    assert len(additive_signals) == 1
+    assert len(route_signals) == 1
+    assert "171" in cache
+    assert "route:india:12.2.1" in cache

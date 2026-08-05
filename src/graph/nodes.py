@@ -35,7 +35,7 @@ from src.extract.text_parser import parse_declaration
 from src.extractors.base import LabelExtractor
 from src.horizon import news_cache
 from src.horizon.lane import find_horizon_signals
-from src.horizon.news import find_news_signals
+from src.horizon.news import find_news_signals, find_route_news_signals
 from src.horizon.schemas import HorizonResult
 from src.horizon.search import SearchProvider
 from src.pipeline import run_extraction
@@ -368,6 +368,22 @@ def make_horizon_node(horizon_signals: list[dict], horizon_meta: dict) -> Callab
     return horizon_node
 
 
+def _product_category_name(verdict: ProductVerdict, fcs_code: str) -> str | None:
+    """The plain category name for `fcs_code`, read off the verdict's own
+    CategoryVerdict rows -- the SAME lookup app.py's _category_summary
+    does for the product identity header, duplicated here rather than
+    imported: app.py is the UI layer and this module must not depend on
+    it, but both need the identical small mapping from a ProductVerdict
+    already in hand. Returns None if no candidate anywhere carries this
+    code (should not happen for a code that came from verdict.category_
+    used itself, but this function does not assume that)."""
+    for item in verdict.items:
+        for cv in item.by_category:
+            if cv.fcs_code == fcs_code:
+                return cv.category_name
+    return None
+
+
 def make_news_node(provider: SearchProvider | None, cache_path: Path, model_id: str) -> Callable[[dict], dict]:
     """A THIRD parallel branch alongside substitutes_node and horizon_node
     -- reads state["verdict"] only. docs/findings.md has no numbered entry
@@ -380,25 +396,38 @@ def make_news_node(provider: SearchProvider | None, cache_path: Path, model_id: 
     news_node cannot see substitutes' or horizon's output either, and
     vice versa.
 
-    Writes state["news_signals"] -- a key of its OWN, separate from
-    state["horizon"], not a second writer sharing horizon_node's key
-    (avoids needing a merge reducer for a case where only one of two
-    simultaneous writers would touch most fields, see src/graph/state.py).
-    Combining this with state["horizon"] into one HorizonResult (which now
-    carries a news_signals field alongside its existing EFSA signals --
-    src/horizon/schemas.py) happens where the graph's output is actually
-    consumed for display (app.py), not here.
+    Writes state["news_signals"] AND state["route_news_signals"]/
+    state["route_news_category"] -- the ADDITIVE-scoped lane
+    (find_news_signals) and the ROUTE-scoped lane (find_route_news_
+    signals, src/horizon/news.py's ROUTE-SCOPED NEWS section) both run
+    from this ONE node, sharing the SAME loaded/saved cache file (their
+    keys are namespaced differently -- additive identity vs. "route:...",
+    see news_cache.get_search_results -- so there is no collision risk in
+    sharing one dict). Kept as separate state keys from "horizon" (and
+    from each other's shape), for the identical reducer-avoidance reason
+    news_signals itself already is; see src/graph/state.py. Combining
+    these into one HorizonResult happens where the graph's output is
+    actually consumed for display (app.py), not here.
+
+    The route query's subject is the CONFIRMED PRODUCT-LEVEL category
+    (verdict.category_used[PRODUCT_SCOPE_KEY]), resolved to its plain
+    name via _product_category_name -- never a component-level category
+    (a "Seasoning" sub-query is not what "exporting this kind of product
+    from India" means) and never the fcs_code itself. None when no
+    product-level category was confirmed (a component-only confirmation)
+    -- find_route_news_signals still runs, degrading to its own generic
+    fallback query rather than being skipped.
 
     Degrades cleanly when `provider` is None (src/horizon/search.py's
-    get_search_provider() found no configured key): returns
-    {"news_signals": []} immediately, no cache touched, no error -- the
-    EFSA lane (horizon_node) is entirely unaffected either way, since the
-    two branches share no state.
+    get_search_provider() found no configured key): returns empty results
+    for both lanes immediately, no cache touched, no error -- the EFSA
+    lane (horizon_node) is entirely unaffected either way, since the two
+    branches share no state.
     """
 
     def news_node(state: dict) -> dict:
         if provider is None:
-            return {"news_signals": []}
+            return {"news_signals": [], "route_news_signals": [], "route_news_category": None}
         try:
             verdict = ProductVerdict.model_validate(state["verdict"])
             additive_ids = sorted({i.eu_canonical_id for i in verdict.items if i.eu_canonical_id})
@@ -406,16 +435,24 @@ def make_news_node(provider: SearchProvider | None, cache_path: Path, model_id: 
                 i.eu_canonical_id: i.additive_name for i in verdict.items if i.eu_canonical_id and i.additive_name
             }
             cache = news_cache.load_cache(cache_path)
-            signals, updated_cache = find_news_signals(
-                additive_ids,
-                provider,
-                cache,
-                model_id,
-                datetime.now(UTC).date(),
-                additive_names=additive_names,
+            today = datetime.now(UTC).date()
+
+            signals, cache = find_news_signals(
+                additive_ids, provider, cache, model_id, today, additive_names=additive_names
             )
-            news_cache.save_cache(cache_path, updated_cache)
-            return {"news_signals": [s.model_dump(mode="json") for s in signals]}
+
+            product_fcs_code = verdict.category_used.get(PRODUCT_SCOPE_KEY)
+            category_name = _product_category_name(verdict, product_fcs_code) if product_fcs_code else None
+            route_signals, cache, route_category = find_route_news_signals(
+                product_fcs_code, category_name, provider, cache, model_id, today
+            )
+
+            news_cache.save_cache(cache_path, cache)
+            return {
+                "news_signals": [s.model_dump(mode="json") for s in signals],
+                "route_news_signals": [s.model_dump(mode="json") for s in route_signals],
+                "route_news_category": route_category,
+            }
         except Exception as exc:  # noqa: BLE001
             return {"errors": [f"news_node: {exc}"]}
 
