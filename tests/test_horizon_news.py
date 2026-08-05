@@ -13,6 +13,9 @@ from src.horizon import news as news_module
 from src.horizon.news import (
     MAX_ADDITIVES_PER_RUN,
     MAX_RESULTS_CLASSIFIED_PER_ADDITIVE,
+    NEWS_INITIAL_BACKOFF_SECONDS,
+    NEWS_MAX_BACKOFF_SECONDS,
+    NEWS_MAX_RETRIES,
     build_news_signal,
     check_category_consistency,
     check_modality_backstop,
@@ -582,3 +585,42 @@ def test_find_news_signals_carries_stale_cache_served_flag(monkeypatch):
 
     assert len(signals) == 1
     assert "stale_cache_served" in signals[0].flags
+
+
+# --------------------------------------------------------------------------- #
+# _call_model's retry budget -- the news lane is advisory only
+# (NewsSignal.affects_verdict is always False), so it gets its OWN,
+# deliberately smaller retry budget than the compliance-bearing paths.
+# --------------------------------------------------------------------------- #
+def test_call_model_passes_the_news_retry_budget_to_the_text_generator(monkeypatch):
+    captured: dict = {}
+
+    class _FakeGenerator:
+        def complete(self, prompt, model_id, **kwargs):
+            captured.update(kwargs)
+            return "ok"
+
+    monkeypatch.setattr(news_module, "get_text_generator", lambda: _FakeGenerator())
+
+    result = news_module._call_model("prompt", "fake-model")
+
+    assert result == "ok"
+    assert captured == {
+        "max_retries": NEWS_MAX_RETRIES,
+        "initial_backoff_seconds": NEWS_INITIAL_BACKOFF_SECONDS,
+        "max_backoff_seconds": NEWS_MAX_BACKOFF_SECONDS,
+    }
+
+
+def test_news_retry_budget_is_smaller_than_the_extraction_paths():
+    # OBSERVED: repeated 503 UNAVAILABLE "high demand" errors made the news
+    # lane (advisory only, up to MAX_RESULTS_CLASSIFIED_PER_ADDITIVE calls
+    # per additive) cost more wall-clock time than the compliance path
+    # itself. This locks the RELATIONSHIP in, not just the news lane's own
+    # value, so a future change to either constant cannot silently
+    # re-equalise them and reintroduce the same problem. Extraction is the
+    # compliance-bearing path this must stay smaller than -- it should wait
+    # as long as it takes; the news lane should not.
+    from src.extractors.gemini import MAX_RATE_LIMIT_RETRIES as EXTRACTION_MAX_RETRIES
+
+    assert NEWS_MAX_RETRIES < EXTRACTION_MAX_RETRIES

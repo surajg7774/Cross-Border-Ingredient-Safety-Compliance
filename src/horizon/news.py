@@ -290,13 +290,39 @@ def _build_classify_prompt(additive_name: str, result: SearchResult) -> str:
     return _CLASSIFY_PROMPT_RULES.format(additive_name=additive_name, title=result.title, content=result.content)
 
 
+# The news lane is ADVISORY ONLY -- NewsSignal.affects_verdict is always
+# False (see build_news_signal) -- so a struggling model here should
+# degrade the news section, not cost the whole screening minutes of
+# waiting. src.text_generation's shared default budget (5 attempts,
+# 2s/4s/8s/16s/32s backoff, uncapped -- tuned for extraction/resolution/
+# narration, which SHOULD wait as long as it takes) costs up to ~30s per
+# failing call, and this lane makes up to MAX_RESULTS_CLASSIFIED_PER_
+# ADDITIVE calls per additive -- a minute or more of waiting was OBSERVED
+# from repeated 503 UNAVAILABLE "high demand" errors. Fewer attempts (2,
+# vs. 5) and a lower backoff cap (4s, vs. uncapped) instead: one retry,
+# a few seconds, then give up and let this ONE result be skipped (see
+# classify_and_quote's caller, which already treats a failed classify as
+# "no signal" rather than an error).
+NEWS_MAX_RETRIES = 2
+NEWS_INITIAL_BACKOFF_SECONDS = 2.0
+NEWS_MAX_BACKOFF_SECONDS = 4.0
+
+
 def _call_model(prompt: str, model_id: str) -> str:
     """Delegates to whichever TextGenerator settings.MODEL_BACKEND selects
     -- same seam src/report/narrator.py and src/category/multiquery.py
-    already use. Kept as its own function (rather than inlined into
-    classify_and_quote) so tests can monkeypatch this ONE call site, the
-    same pattern tests/test_narrator.py already establishes."""
-    return get_text_generator().complete(prompt, model_id)
+    already use, but with the NEWS_* retry budget above instead of that
+    seam's own (larger) default -- see the comment there. Kept as its own
+    function (rather than inlined into classify_and_quote) so tests can
+    monkeypatch this ONE call site, the same pattern tests/test_narrator.py
+    already establishes."""
+    return get_text_generator().complete(
+        prompt,
+        model_id,
+        max_retries=NEWS_MAX_RETRIES,
+        initial_backoff_seconds=NEWS_INITIAL_BACKOFF_SECONDS,
+        max_backoff_seconds=NEWS_MAX_BACKOFF_SECONDS,
+    )
 
 
 def classify_and_quote(result: SearchResult, additive_name: str, model_id: str) -> tuple[str, str] | None:

@@ -18,6 +18,8 @@ from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 
 from config import settings
 from src.text_generation import (
+    INITIAL_BACKOFF_SECONDS,
+    MAX_RATE_LIMIT_RETRIES,
     EmptyResponseError,
     GeminiTextGenerator,
     LangChainTextGenerator,
@@ -104,6 +106,50 @@ def test_gemini_generator_retries_on_429_then_succeeds(monkeypatch):
     monkeypatch.setattr("src.model_call.time.sleep", lambda s: None)
 
     assert generator.complete("prompt", "fake-model") == "hello"
+
+
+# --------------------------------------------------------------------------- #
+# complete()'s keyword-only retry-tuning overrides -- exist so a caller
+# whose result is advisory only (src/horizon/news.py) can pass its own
+# smaller budget without affecting narrator.py/multiquery.py, which never
+# pass them and must see IDENTICAL behaviour to before this was added.
+# --------------------------------------------------------------------------- #
+def test_gemini_generator_default_retry_params_match_the_module_constants():
+    # No caller that omits the new keyword-only params (every EXISTING
+    # caller) can observe any behaviour change -- their defaults ARE this
+    # module's own shared tuning.
+    import inspect
+
+    params = inspect.signature(GeminiTextGenerator.complete).parameters
+    assert params["max_retries"].default == MAX_RATE_LIMIT_RETRIES
+    assert params["initial_backoff_seconds"].default == INITIAL_BACKOFF_SECONDS
+    assert params["max_backoff_seconds"].default is None
+
+
+def test_gemini_generator_honours_a_smaller_max_retries_override(monkeypatch):
+    # A caller with its OWN (smaller) budget -- e.g. src/horizon/news.py's
+    # advisory-only classify step -- must actually get fewer attempts, not
+    # silently fall back to this module's larger shared default.
+    generator = _gemini_generator_with_mocked_client()
+    generator._client.models.generate_content.side_effect = [
+        _fake_api_error(503),
+        Mock(text="hello", candidates=[]),  # would succeed on a second attempt
+    ]
+    monkeypatch.setattr("src.model_call.time.sleep", lambda s: None)
+
+    with pytest.raises(errors.APIError):
+        generator.complete("prompt", "fake-model", max_retries=1)  # no retry allowed at all
+
+
+def test_gemini_generator_override_still_retries_up_to_its_own_budget(monkeypatch):
+    generator = _gemini_generator_with_mocked_client()
+    generator._client.models.generate_content.side_effect = [
+        _fake_api_error(503),
+        Mock(text="hello", candidates=[]),
+    ]
+    monkeypatch.setattr("src.model_call.time.sleep", lambda s: None)
+
+    assert generator.complete("prompt", "fake-model", max_retries=2) == "hello"
 
 
 # --------------------------------------------------------------------------- #

@@ -251,13 +251,30 @@ def _generate_via_langchain(chat: ChatGoogleGenerativeAI, content: str | list) -
 
 
 class TextGenerator(Protocol):
-    def complete(self, prompt: str, model_id: str) -> str:
+    def complete(
+        self,
+        prompt: str,
+        model_id: str,
+        *,
+        max_retries: int = MAX_RATE_LIMIT_RETRIES,
+        initial_backoff_seconds: float = INITIAL_BACKOFF_SECONDS,
+        max_backoff_seconds: float | None = None,
+    ) -> str:
         """Send `prompt` to `model_id`, return the raw text response
         (fences, if any, are NOT stripped here -- callers, e.g.
         src/report/narrator.py's narrate(), already do that with
         src.model_call.strip_markdown_fences on whatever this returns).
         Raises on failure (network, empty response, exhausted retries);
-        callers catch broadly and fall back to a deterministic result."""
+        callers catch broadly and fall back to a deterministic result.
+
+        The three keyword-only params default to this module's own shared
+        tuning -- every existing caller (narrator.py, multiquery.py) that
+        does not pass them gets EXACTLY the same retry behaviour as
+        before. They exist so a caller whose result is advisory only
+        (src/horizon/news.py's classify step -- NewsSignal.affects_verdict
+        is always False) can pass its own smaller budget instead of
+        waiting through the same ladder a compliance-bearing call
+        (extraction, resolution, narration) rightly should."""
         ...
 
 
@@ -271,7 +288,15 @@ class GeminiTextGenerator:
 
         self._client = genai.Client(api_key=settings.GOOGLE_API_KEY)
 
-    def complete(self, prompt: str, model_id: str) -> str:
+    def complete(
+        self,
+        prompt: str,
+        model_id: str,
+        *,
+        max_retries: int = MAX_RATE_LIMIT_RETRIES,
+        initial_backoff_seconds: float = INITIAL_BACKOFF_SECONDS,
+        max_backoff_seconds: float | None = None,
+    ) -> str:
         def _call() -> str:
             response = self._client.models.generate_content(model=model_id, contents=[prompt])
             if response.text is None:
@@ -286,9 +311,10 @@ class GeminiTextGenerator:
 
         return with_retry(
             _call,
-            max_retries=MAX_RATE_LIMIT_RETRIES,
-            initial_backoff_seconds=INITIAL_BACKOFF_SECONDS,
+            max_retries=max_retries,
+            initial_backoff_seconds=initial_backoff_seconds,
             retryable_status_codes=RETRYABLE_STATUS_CODES,
+            max_backoff_seconds=max_backoff_seconds,
         )
 
 
@@ -298,7 +324,15 @@ class LangChainTextGenerator:
     exactly what does and does not survive the translation from the raw
     google-genai response shape."""
 
-    def complete(self, prompt: str, model_id: str) -> str:
+    def complete(
+        self,
+        prompt: str,
+        model_id: str,
+        *,
+        max_retries: int = MAX_RATE_LIMIT_RETRIES,
+        initial_backoff_seconds: float = INITIAL_BACKOFF_SECONDS,
+        max_backoff_seconds: float | None = None,
+    ) -> str:
         chat = ChatGoogleGenerativeAI(
             model=model_id,
             google_api_key=settings.GOOGLE_API_KEY,
@@ -312,9 +346,10 @@ class LangChainTextGenerator:
 
         return with_retry(
             lambda: _generate_via_langchain(chat, prompt),
-            max_retries=MAX_RATE_LIMIT_RETRIES,
-            initial_backoff_seconds=INITIAL_BACKOFF_SECONDS,
+            max_retries=max_retries,
+            initial_backoff_seconds=initial_backoff_seconds,
             retryable_status_codes=RETRYABLE_STATUS_CODES,
+            max_backoff_seconds=max_backoff_seconds,
         )
 
 

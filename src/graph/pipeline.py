@@ -186,7 +186,14 @@ def build_pipeline(
     graph.add_node("verdict", make_verdict_node(refs.eu_fip, refs.category_names, refs.codex_ins))
     graph.add_node("substitutes", make_substitutes_node(refs.eu_fip, refs.codex_ins))
     graph.add_node("horizon", make_horizon_node(refs.horizon_signals, refs.horizon_meta))
-    graph.add_node("news", make_news_node(search_provider, NEWS_CACHE_PATH, model_id))
+    # SECONDARY_MODEL, not `model_id` (PRIMARY_MODEL) -- OBSERVED: repeated
+    # 503 UNAVAILABLE "high demand" errors from PRIMARY_MODEL. The news
+    # classify step (src.horizon.news.classify_and_quote) is advisory only
+    # (NewsSignal.affects_verdict is always False) and a narrow task -- pick
+    # one category from a fixed set, quote a verbatim span -- so it does not
+    # need PRIMARY_MODEL's capacity. Narration keeps `model_id` unchanged:
+    # only the news lane's model moves.
+    graph.add_node("news", make_news_node(search_provider, NEWS_CACHE_PATH, settings.SECONDARY_MODEL))
     graph.add_node("narrate", make_narrate_node(model_id))
 
     graph.add_edge(START, "extract")
