@@ -1,0 +1,350 @@
+{
+  "items": [
+    {
+      "item_id": 0,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 1,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 2,
+      "canonical_ins": "965(i)",
+      "eu_canonical_id": "965",
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Bulking agent",
+        "Emulsifier",
+        "Humectant",
+        "Sweetener",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "codex_name",
+      "resolution_confidence": 0.98,
+      "flags": [
+        "eu_widened_to_parent"
+      ],
+      "candidates": [],
+      "matched_on": "Maltitol"
+    },
+    {
+      "item_id": 3,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Fructooligosaccharides"
+    },
+    {
+      "item_id": 4,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Cocoa Solids"
+    },
+    {
+      "item_id": 5,
+      "canonical_ins": "968",
+      "eu_canonical_id": "968",
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Flavour enhancer",
+        "Humectant",
+        "Sweetener"
+      ],
+      "resolution_method": "codex_name",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Erythritol"
+    },
+    {
+      "item_id": 6,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Whey Protein Concentrate"
+    },
+    {
+      "item_id": 7,
+      "canonical_ins": "471",
+      "eu_canonical_id": "471",
+      "classification": "additive",
+      "normalised_role": "Emulsifier",
+      "codex_functional_classes": [
+        "Emulsifier",
+        "Glazing agent"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "471"
+    },
+    {
+      "item_id": 8,
+      "canonical_ins": "412",
+      "eu_canonical_id": "412",
+      "classification": "additive",
+      "normalised_role": "Stabilizer",
+      "codex_functional_classes": [
+        "Emulsifier",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "412"
+    },
+    {
+      "item_id": 9,
+      "canonical_ins": "407",
+      "eu_canonical_id": "407",
+      "classification": "additive",
+      "normalised_role": "Stabilizer",
+      "codex_functional_classes": [
+        "Bulking agent",
+        "Carrier",
+        "Emulsifier",
+        "Gelling agent",
+        "Glazing agent",
+        "Humectant",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "407"
+    },
+    {
+      "item_id": 10,
+      "canonical_ins": "410",
+      "eu_canonical_id": "410",
+      "classification": "additive",
+      "normalised_role": "Stabilizer",
+      "codex_functional_classes": [
+        "Emulsifier",
+        "Gelling agent",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "410"
+    },
+    {
+      "item_id": 11,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "ambiguous",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "ambiguous",
+      "resolution_confidence": 0.0,
+      "flags": [
+        "ambiguous_candidates"
+      ],
+      "candidates": [
+        "960a",
+        "960b",
+        "960c",
+        "960d"
+      ],
+      "matched_on": "Stevia"
+    },
+    {
+      "item_id": 12,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "flavouring",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.95,
+      "flags": [
+        "out_of_annex_ii_scope"
+      ],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 13,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 14,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 15,
+      "canonical_ins": "965(i)",
+      "eu_canonical_id": "965",
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Bulking agent",
+        "Emulsifier",
+        "Humectant",
+        "Sweetener",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "codex_name",
+      "resolution_confidence": 0.98,
+      "flags": [
+        "eu_widened_to_parent"
+      ],
+      "candidates": [],
+      "matched_on": "Maltitol"
+    },
+    {
+      "item_id": 16,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Refined Coconut Oil"
+    },
+    {
+      "item_id": 17,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Cocoa Solids"
+    },
+    {
+      "item_id": 18,
+      "canonical_ins": "322(i)",
+      "eu_canonical_id": "322",
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Antioxidant",
+        "Emulsifier",
+        "Flour treatment agent"
+      ],
+      "resolution_method": "alias",
+      "resolution_confidence": 0.92,
+      "flags": [
+        "eu_widened_to_parent"
+      ],
+      "candidates": [],
+      "matched_on": "soya lecithin"
+    },
+    {
+      "item_id": 19,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Cocoa Butter"
+    },
+    {
+      "item_id": 20,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 21,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    }
+  ],
+  "warnings": [],
+  "index_version": "178af7a7517d"
+}

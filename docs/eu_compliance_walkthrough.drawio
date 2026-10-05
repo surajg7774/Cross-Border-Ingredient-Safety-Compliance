@@ -1,0 +1,306 @@
+<mxfile host="app.diagrams.net" modified="2026-08-02T21:00:00.000Z" agent="walkthrough" version="24.0.0">
+
+  <diagram name="1 · Overview" id="overview">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="What this system does" style="text;html=1;fontSize=22;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" /></mxCell>
+        <mxCell id="t2" value="An Indian food manufacturer photographs a product label. The system reads it and answers: can this be sold in the EU?" style="text;html=1;fontSize=13;fontColor=#555555;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="900" height="20" as="geometry" /></mxCell>
+
+        <mxCell id="q" value="THE QUESTION IT ANSWERS&#10;&#10;EU law lists every food additive that is allowed, and in which kinds of food.&#10;That list is Annex II of Regulation 1333/2008 — 18,987 rows in our copy.&#10;&#10;An additive allowed in seasoning may NOT be allowed in a crisp.&#10;So the answer always depends on TWO things:&#10;&#10;   1. which additive is it, exactly?&#10;   2. what kind of food is it in?&#10;&#10;Most of this system exists to answer those two questions reliably." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;align=left;fontSize=12;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="95" width="520" height="230" as="geometry" /></mxCell>
+
+        <mxCell id="hard" value="WHY IT IS HARD&#10;&#10;Indian labels use INS numbers (INS 471), EU law uses E numbers (E471).&#10;Sometimes they match. Sometimes they do not — INS 470(i) has no direct&#10;EU equivalent at all.&#10;&#10;Many additives are declared by NAME with no number:&#10;&quot;soy lecithin&quot; is E322, but EU law calls it &quot;Lecithins&quot;.&#10;&#10;Some ingredients look like additives but are not — turmeric is a spice&#10;AND a colour, depending on how it is declared.&#10;&#10;And a photo is a photo. It may be blurry, curved, or not a label at all." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;align=left;fontSize=12;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="600" y="95" width="560" height="230" as="geometry" /></mxCell>
+
+        <mxCell id="flow" value="THE SIX STEPS" style="text;html=1;fontSize=16;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="355" width="400" height="24" as="geometry" /></mxCell>
+
+        <mxCell id="i" value="You give it&#10;a label photo, or typed ingredients" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="360" y="395" width="440" height="50" as="geometry" /></mxCell>
+
+        <mxCell id="s1" value="STEP 1 — READ THE LABEL&#10;An AI model that can see images reads the ingredients list.&#10;It writes down exactly what is printed. It is not allowed to interpret.&#10;&#10;OUT:  a list of items — the text, any code, any nesting" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="360" y="470" width="440" height="85" as="geometry" /></mxCell>
+
+        <mxCell id="s2" value="STEP 2 — WORK OUT WHAT EACH ITEM IS&#10;No AI here. A fixed sequence of lookups against reference data.&#10;&quot;soy lecithin&quot; → 322 → E322 → an additive.&#10;&quot;wheat flour&quot; → in the food list → not an additive.&#10;&#10;OUT:  each item now has an identity, or is marked unknown" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="360" y="580" width="440" height="95" as="geometry" /></mxCell>
+
+        <mxCell id="s3" value="STEP 3 — WHAT KIND OF FOOD IS THIS?&#10;EU law has 155 food categories. We search them by meaning,&#10;not by keyword, using embeddings.&#10;&#10;This is the weakest part: it picks the right one first only about&#10;half the time. Which is why the next step exists." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="360" y="700" width="440" height="95" as="geometry" /></mxCell>
+
+        <mxCell id="sh" value="STEP 4 — A PERSON CONFIRMS THE CATEGORY&#10;The system stops and shows its top 3 guesses. You pick.&#10;It cannot continue until you do." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;fontStyle=1;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="360" y="820" width="440" height="65" as="geometry" /></mxCell>
+
+        <mxCell id="s4" value="STEP 5 — LOOK UP THE LAW&#10;Now we have an additive and a food category. Look up the row.&#10;No AI. Same input always gives the same answer.&#10;&#10;OUT:  permitted / not permitted / needs review, with a link to the source" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="360" y="910" width="440" height="95" as="geometry" /></mxCell>
+
+        <mxCell id="s5" value="STEP 6 — EXTRAS AND THE WRITE-UP&#10;If something is blocked, suggest replacements.&#10;Flag anything under review by the EU food safety authority.&#10;Then an AI model writes it up in plain English — and a checker&#10;confirms it invented nothing.&#10;&#10;OUT:  a report you can download or email" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="360" y="1030" width="440" height="110" as="geometry" /></mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="i" target="s1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s1" target="s2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s2" target="s3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s3" target="sh"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="sh" target="s4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s4" target="s5"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="key" value="THE ONE IDEA THAT SHAPES EVERYTHING&#10;&#10;AI models are used only at the START and the END.&#10;&#10;At the start: reading the photo, and guessing the food category.&#10;At the end: writing the summary in plain English.&#10;&#10;The VERDICT in the middle is a database lookup.&#10;It cannot vary between runs. It can always be traced to a source.&#10;&#10;A model can be wrong. A lookup can be checked." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#333333;align=left;fontSize=12;spacingLeft=12;verticalAlign=top;spacingTop=10;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="850" y="470" width="310" height="235" as="geometry" /></mxCell>
+
+        <mxCell id="key2" value="AND ONE RULE ABOUT THE CODE&#10;&#10;Each step writes a JSON file. The next step reads that file.&#10;They never call each other directly.&#10;&#10;So you can re-run step 3 twenty times without re-reading the photo.&#10;That is how we tested 20+ search configurations cheaply." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#999999;align=left;fontSize=12;spacingLeft=12;verticalAlign=top;spacingTop=10;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="850" y="730" width="310" height="160" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="2 · Step 1 Reading the label" id="step1">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1250" pageHeight="1300" math="0" shadow="0">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="Step 1 — Reading the label" style="text;html=1;fontSize=22;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="600" height="30" as="geometry" /></mxCell>
+        <mxCell id="t2" value="Turn a photograph into a structured list of what is printed. Nothing more." style="text;html=1;fontSize=13;fontColor=#555555;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="800" height="20" as="geometry" /></mxCell>
+
+        <mxCell id="in" value="INPUT&#10;&#10;Parle-Gmain.jpeg  —  about 200 KB of image data&#10;We do not resize it or crop it. The whole photo goes to the model." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="95" width="560" height="70" as="geometry" /></mxCell>
+
+        <mxCell id="c1" value="CALL 1 — THE GATE&#10;&#10;Question asked of the model:&#10;&quot;Is this a food label? Is there an ingredients list on it?&#10; What languages? Where is the panel?&quot;&#10;&#10;Why ask separately: if it is a nutrition table with no ingredients,&#10;there is nothing to extract and we stop here instead of&#10;wasting a second call and returning an empty result." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="190" width="560" height="180" as="geometry" /></mxCell>
+
+        <mxCell id="c1o" value="GateResult  —  the shape the model must return&#10;&#10;is_food_label              true&#10;has_ingredients_declaration true&#10;evidence_found             [&quot;ingredients_keyword&quot;, &quot;e_number_pattern&quot;]&#10;languages_detected         [&quot;en&quot;]&#10;ingredients_panel_bbox     [0, 0, 1, 1]&#10;confidence                 0.4      ← WE calculate this, not the model&#10;warnings                   [&quot;panel not localised&quot;]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#7D3C98;fontSize=11;fontFamily=Courier New;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="190" width="560" height="180" as="geometry" /></mxCell>
+
+        <mxCell id="prob1" value="PROBLEM WE HIT&#10;&#10;We originally asked the model how confident it was.&#10;It answered 0.0 while saying &quot;yes this is a food label&quot; with clear evidence.&#10;And on the extract call, every single item came back at exactly 1.0.&#10;&#10;FIX&#10;Stop asking. We count how many pieces of evidence it found&#10;(ingredients keyword? nutrition table? net weight? a code? a date?)&#10;and divide by five. 2 out of 5 = 0.4.&#10;&#10;WHY IT MATTERS&#10;A model's opinion of its own certainty does not track being right.&#10;This same rule is used later: the resolver's confidence comes from&#10;WHICH lookup succeeded, never from a model." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="395" width="560" height="270" as="geometry" /></mxCell>
+
+        <mxCell id="c2" value="CALL 2 — THE EXTRACT&#10;&#10;Question asked of the model:&#10;&quot;Break the ingredients list into items. For each one, record the text,&#10; any code printed, which functional class introduced it, and what it&#10; sits inside.&quot;&#10;&#10;THE RULE THAT SHAPES THIS WHOLE PROJECT:&#10;&#10;   Copy exactly what is printed. Never work anything out.&#10;   If the label says &quot;INS 470(i)&quot;, write &quot;INS 470(i)&quot;.&#10;   Do not turn it into E470. Do not tidy the spacing.&#10;&#10;There is deliberately NO field for &quot;is this an additive&quot;.&#10;The model is not allowed to have an opinion on that." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="395" width="560" height="270" as="geometry" /></mxCell>
+
+        <mxCell id="why" value="WHY THAT RULE EARNED ITS PLACE&#10;&#10;Chips prints INS 470(i). If the model had been allowed to convert it,&#10;it would very likely have written E470 — which looks right and is wrong.&#10;&#10;Because it copied verbatim, we later DISCOVERED that INS 470(i) has no&#10;E-number equivalent at all. The EU has 470a and 470b, and getting from&#10;one to the other needs a name comparison, not a number.&#10;&#10;A field the model cannot fill is a mistake it cannot make." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="690" width="560" height="185" as="geometry" /></mxCell>
+
+        <mxCell id="c2o" value="ExtractedItem  —  one per ingredient, 14 fields&#10;&#10;item_id           10        a number so later steps can point at it&#10;position          7         where it appears in the list&#10;nesting_depth     0         0 = top level, 1 = inside a bracket&#10;parent_item_id    null      what it sits inside, if anything&#10;verbatim          &quot;1101 ( ii )&quot;   exactly as printed, spacing and all&#10;name_as_declared  null      null because only a code was printed&#10;declared_role     &quot;FLOUR TREATMENT AGENT&quot;&#10;role_source       &quot;group_heading&quot;  a bracket, not a colon&#10;declared_code     &quot;1101 ( ii )&quot;&#10;code_system       &quot;bare&quot;    no E, no INS prefix on the pack&#10;percentage        null&#10;emphasis          false     is it bold or capitalised differently&#10;footnote_marker   null      a + or # tying it to a footnote&#10;confidence        1.0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#7D3C98;fontSize=11;fontFamily=Courier New;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="690" width="560" height="290" as="geometry" /></mxCell>
+
+        <mxCell id="def" value="FOUR DEFENCES AROUND EVERY MODEL CALL&#10;each one exists because it actually went wrong&#10;&#10;1  FENCE STRIPPING&#10;   The model wraps its answer in ```json even though the prompt says not to.&#10;   Proof that a prompt is a request, not a guarantee.&#10;&#10;2  EMPTY RESPONSE&#10;   Sometimes the model returns no text at all — blocked or cut off.&#10;   The library hands back None rather than raising. Our code crashed on it.&#10;   Now it counts as a failed attempt and retries.&#10;&#10;3  BACKOFF ON 429 / 500 / 503&#10;   Started as 429 only. A 503 on image 3 of 10 killed a whole batch run&#10;   and images 4 to 10 never ran.&#10;&#10;4  CACHING ON FOUR THINGS&#10;   image + model id + which call + THE PROMPT TEXT.&#10;   Without the model id, comparing two models returns the first one's&#10;   cached answer and they look identical.&#10;   Without the prompt text, editing a prompt returns the OLD result and&#10;   you conclude the fix did not work." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="900" width="560" height="340" as="geometry" /></mxCell>
+
+        <mxCell id="guards" value="THREE PLACES WE STOP&#10;&#10;not a food label            → stop, say why&#10;a label but no ingredients  → stop, &quot;please photograph the ingredients panel&quot;&#10;zero items extracted        → stop, this is a FAILURE not a clean result&#10;&#10;That last one matters most. A screening that returns nothing and reports&#10;success reads downstream as &quot;no problems found&quot; — the most dangerous&#10;output this system could produce." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="1000" width="560" height="200" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="3 · Step 2 What is it" id="step2">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1250" pageHeight="1350" math="0" shadow="0">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="Step 2 — Working out what each item is" style="text;html=1;fontSize=22;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" /></mxCell>
+        <mxCell id="t2" value="No AI in this step at all. A fixed sequence of lookups. Same input, same answer, every time." style="text;html=1;fontSize=13;fontColor=#555555;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="900" height="20" as="geometry" /></mxCell>
+
+        <mxCell id="ref" value="WHAT IT LOOKS THINGS UP IN&#10;&#10;codex_ins.json&#10;   668 substances from the international numbering standard.&#10;   Number, official name, other names, what it does.&#10;   We built this from a 140-page PDF because the website blocked us.&#10;&#10;label_aliases.json&#10;   66 everyday names the standard does not list.&#10;   &quot;sodium bicarbonate&quot; → 500(ii), because EU law calls it&#10;   &quot;sodium hydrogen carbonate&quot; and nothing links the two.&#10;   Also a list of 12 genuinely ambiguous names, and a food list.&#10;&#10;eu_fip.json&#10;   18,987 rows of EU law: which additive, in which food, at what level." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#666666;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="95" width="560" height="270" as="geometry" /></mxCell>
+
+        <mxCell id="two" value="TWO ROUTES IN&#10;&#10;A code was printed        →  the CODE PATH&#10;Only a name was printed   →  the NAME PATH&#10;&#10;Across our test labels: 48 items had codes, 140 had only names." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="95" width="560" height="120" as="geometry" /></mxCell>
+
+        <mxCell id="cp" value="THE CODE PATH&#10;&#10;1  Tidy it up.  &quot;INS 470(i)&quot; and &quot;503 ( ii )&quot; and &quot;E471&quot;&#10;   all become 470(i), 503(ii), 471.&#10;&#10;2  Look it up directly.  Works for 24 of the 29 codes on our labels.&#10;&#10;3  If not found, try the family.  451(i) is not listed, but 451 is.&#10;   Use the parent and flag that we widened it.&#10;&#10;4  Still nothing → mark unresolved. Never guess a near neighbour." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="240" width="560" height="200" as="geometry" /></mxCell>
+
+        <mxCell id="np" value="THE NAME PATH — order matters enormously&#10;&#10;1  Exact match against the official name&#10;2  Match against listed alternative names&#10;3  Match against our hand-written alias list&#10;4  ── IS IT A FOOD? ──  if yes, STOP HERE, it is not an additive&#10;5  Is it one of the 12 known-ambiguous names? → send to a person&#10;6  Fuzzy match, allowing small spelling differences&#10;7  Give up → mark unresolved&#10;&#10;STEP 4 MUST COME BEFORE STEP 6.&#10;&#10;If fuzzy matching runs first, &quot;turmeric powder&quot; gets matched to&#10;E100 curcumin — which IS a real additive made from turmeric.&#10;The spice in a masala would be reported as a food colour.&#10;&#10;Checking the food list first stops that." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="395" width="560" height="290" as="geometry" /></mxCell>
+
+        <mxCell id="fam" value="THE FAMILY GUARD&#10;&#10;Some additives have names that differ by one letter and are&#10;completely different substances in law:&#10;&#10;   E472a  E472b  E472c  E472d  E472e  E472f&#10;   E160a  E160b  E160c  E160d  E160e  E160f&#10;   E306   E307   E308   E309&#10;&#10;A fuzzy match scoring 0.94 against E472c is not evidence.&#10;It is noise that happens to score well.&#10;&#10;So: if a match lands in one of these families but the original text&#10;did not carry the distinguishing letter, we FORCE it to manual review&#10;regardless of how good the score was." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="465" width="560" height="245" as="geometry" /></mxCell>
+
+        <mxCell id="cls" value="THEN IT DECIDES WHAT KIND OF THING IT IS&#10;&#10;additive          in the standard, and in EU law&#10;food_ingredient   flour, sugar, milk — not regulated as an additive&#10;flavouring        a different EU regulation entirely (1334/2008)&#10;enzyme            a different EU regulation again (1332/2008)&#10;compound          a container like &quot;Seasoning&quot; that holds other things&#10;ambiguous         we know the family but not which member&#10;unknown           we could not identify it&#10;&#10;ONE HARD RULE:&#10;if it appears in EU law, it IS an additive — no matter what the&#10;label's wording suggests. That rule caught a real bug where&#10;&quot;Flavour Enhancers&quot; was being read as &quot;flavouring&quot; and two genuine&#10;additives were being skipped entirely." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="715" width="560" height="290" as="geometry" /></mxCell>
+
+        <mxCell id="cross" value="THE CROSSWALK — INS number to EU number&#10;&#10;Most of the time the numbers are the same: INS 330 = E330.&#10;&#10;When they are not, four things are tried in order:&#10;&#10;1  exact          470(i) → is there a 470(i) in EU law?  No.&#10;2  parent         451(i) → try 451.  Yes, that works.&#10;3  BY NAME        470(i) is &quot;salts of myristic, palmitic and stearic&#10;                  acids…&quot;.  EU 470a is &quot;sodium, potassium and calcium&#10;                  salts of fatty acids&quot;.  Same substance. Match by name.&#10;                  Confidence capped at 0.75 — this is inference.&#10;4  not there      1101(ii) is papain, an ENZYME. Different regulation.&#10;                  Correct answer is &quot;out of scope&quot;, NOT &quot;not permitted&quot;.&#10;&#10;That last case matters: a naive check would say &quot;not in the list,&#10;therefore banned&quot; and fail a perfectly legal biscuit." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="740" width="560" height="290" as="geometry" /></mxCell>
+
+        <mxCell id="conf" value="CONFIDENCE COMES FROM HOW IT WAS FOUND — never from a model&#10;&#10;0.98   found by exact code or exact name&#10;0.95   found via a listed alternative name&#10;0.92   found via our alias list&#10;0.90   found via the family parent&#10;0.80   fuzzy match&#10;0.75   matched by comparing names across systems&#10;0.00   ambiguous or unresolved  →  a person must decide&#10;&#10;Anything below 0.80 never reaches the law lookup.&#10;A wrong verdict is worse than no verdict." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1035" width="560" height="230" as="geometry" /></mxCell>
+
+        <mxCell id="res" value="RESULT ON OUR HARDEST LABEL&#10;&#10;EU_productmain declares 7 additives by NAME ONLY. No codes at all.&#10;&#10;Against EU law by itself:  3 of 7 identified.&#10;With the standard + our alias list:  6 identified, 2 correctly&#10;                                     sent to review as ambiguous.&#10;&#10;&quot;sodium bicarbonate&quot; is the clearest case: EU law calls it&#10;&quot;sodium hydrogen carbonate&quot;. No amount of clever matching gets&#10;from one to the other. It needs a human-written alias." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="1060" width="560" height="205" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="4 · Step 3 Food category" id="step3">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1250" pageHeight="1250" math="0" shadow="0">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="Step 3 — What kind of food is this?" style="text;html=1;fontSize=22;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" /></mxCell>
+        <mxCell id="t2" value="The weakest part of the system, measured honestly, and the reason a human has to confirm." style="text;html=1;fontSize=13;fontColor=#555555;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="900" height="20" as="geometry" /></mxCell>
+
+        <mxCell id="why" value="WHY THIS STEP EXISTS AT ALL&#10;&#10;EU law does not say &quot;E551 is allowed&quot;. It says&#10;&quot;E551 is allowed in seasonings and condiments&quot;.&#10;&#10;Real example from our test labels:&#10;&#10;   E551 silicon dioxide in SEASONING (12.2.2)  →  permitted&#10;   E551 silicon dioxide in POTATO SNACKS (15.1) →  NOT permitted&#10;&#10;Same additive. Same packet of crisps. Opposite answers.&#10;Get the category wrong and the verdict is confidently wrong." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="95" width="560" height="215" as="geometry" /></mxCell>
+
+        <mxCell id="how" value="HOW THE SEARCH WORKS — in plain terms&#10;&#10;We take the 155 EU food categories and turn each description into&#10;a list of 768 numbers. That list captures MEANING, not words.&#10;&#10;We do the same to a description of the product.&#10;&#10;Then we measure which category's numbers are closest.&#10;&#10;This is &quot;embeddings&quot;. It finds &quot;fine bakery wares&quot; for a biscuit&#10;even though the label never uses those words." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="95" width="560" height="215" as="geometry" /></mxCell>
+
+        <mxCell id="comp" value="ONE CATEGORY IS NOT ENOUGH — the component discovery&#10;&#10;A packet of crisps is not one food. It is:&#10;&#10;   the crisp itself       →  15.1 potato snacks&#10;   the seasoning powder   →  12.2.2 seasonings and condiments&#10;&#10;All six additives on that label sit INSIDE the seasoning bracket.&#10;So they must be judged against the seasoning's category, not the crisp's.&#10;&#10;We found this because E551 kept coming back &quot;not permitted&quot; and we&#10;could not work out why. It is an anticaking agent for powder — EU law&#10;permits it in seasoning, and does not permit it in the finished crisp.&#10;The law was right; we were asking the wrong question.&#10;&#10;So now: one search for the product, plus one for every part of the&#10;product that contains additives." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="340" width="560" height="290" as="geometry" /></mxCell>
+
+        <mxCell id="meas" value="HOW WELL IT WORKS — measured, not guessed&#10;&#10;   right answer ranked FIRST      53% of the time&#10;   right answer in the top THREE  82% of the time&#10;&#10;That is not good enough to trust on its own.&#10;It is good enough to offer three options to a person.&#10;&#10;Which is exactly what we do." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#7D3C98;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="640" y="340" width="560" height="160" as="geometry" /></mxCell>
+
+        <mxCell id="tried" value="WHAT WE TRIED TO IMPROVE IT — and none of it worked&#10;&#10;Four different search methods:&#10;   embeddings (0.82)   ·   keyword search (0.24)&#10;   a vector database (identical to plain search)&#10;   both combined (0.76 — worse)&#10;&#10;Seven ways of writing the category descriptions:&#10;   name only, name plus examples, stripping boilerplate,&#10;   adding the additives each category permits…&#10;   The original wording beat all of them.&#10;&#10;Two more techniques:&#10;   diversifying the results (no change at all)&#10;   rephrasing the query several times (ran out of quota)&#10;&#10;TWENTY-PLUS configurations. Nothing beat where we started." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#999999;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="530" width="560" height="290" as="geometry" /></mxCell>
+
+        <mxCell id="conc" value="THE CONCLUSION — and it is not a failure&#10;&#10;Look at what the system actually has to work with for a biscuit:&#10;&#10;   &quot;REFINED WHEAT FLOUR, SUGAR, REFINED PALM OIL&quot;&#10;&#10;That describes a biscuit. It also describes a cake, a cracker,&#10;and a pastry. Equally well.&#10;&#10;The information needed to tell them apart is NOT ON THE LABEL.&#10;No search method recovers information that is not there.&#10;&#10;So we stopped tuning and built the confirmation step instead." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="660" width="560" height="235" as="geometry" /></mxCell>
+
+        <mxCell id="hum" value="STEP 4 — THE PERSON CONFIRMS&#10;&#10;The system stops. It shows the top three, with scores, and says plainly:&#10;&#10;   &quot;Automatic matching picks the right category first only about half&#10;    the time, and the category determines the verdict.&quot;&#10;&#10;You pick one. Then it continues.&#10;&#10;This is the demo that makes the whole argument:&#10;&#10;   Parle-G, accept the top guess (11.1 sugars)  →  3 items NOT PERMITTED&#10;   Parle-G, choose 7.2 fine bakery wares        →  nothing blocked&#10;&#10;Same label. Same command. One keystroke apart. Opposite answers." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;fontStyle=1;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="925" width="1160" height="230" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="5 · Step 5 The verdict" id="step5">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1250" pageHeight="1300" math="0" shadow="0">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="Step 5 — Looking up the law" style="text;html=1;fontSize=22;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" /></mxCell>
+        <mxCell id="t2" value="No AI. A table lookup and a decision tree. This is the part that must never vary." style="text;html=1;fontSize=13;fontColor=#555555;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="900" height="20" as="geometry" /></mxCell>
+
+        <mxCell id="in" value="WHAT IT NEEDS&#10;&#10;   an additive       E551&#10;   a food category   12.2.2&#10;&#10;It looks for the row where those two meet, in a table of 18,987 rows." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="95" width="560" height="110" as="geometry" /></mxCell>
+
+        <mxCell id="order" value="THE ORDER OF CHECKS — and why each comes where it does&#10;&#10;1  Is it out of scope?&#10;   A flavouring, an enzyme, or just food. Stop. No lookup needed.&#10;&#10;2  Did we fail to identify it?&#10;   Mark unresolved. NOT &quot;banned&quot; — we simply do not know what it is.&#10;&#10;3  Is it banned outright?&#10;   Six substances are prohibited EU-wide, titanium dioxide among them.&#10;   That does not depend on the food category, so we check it early.&#10;&#10;4  Is it in the law at all?&#10;   If not: not authorised. Also independent of category.&#10;&#10;5  Now look up the actual row for this category.&#10;   No row, but it exists elsewhere?  → not permitted IN THIS category&#10;   Row says a maximum level?         → permitted up to that level&#10;   Row carries conditions text?      → permitted, read the conditions&#10;   Nothing else?                     → permitted, no numeric limit" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="95" width="560" height="330" as="geometry" /></mxCell>
+
+        <mxCell id="dist" value="THE DISTINCTION THAT MATTERS MOST&#10;&#10;NOT PERMITTED IN THIS CATEGORY&#10;   The additive is legal in the EU, just not in this kind of food.&#10;   The manufacturer can move it, or reformulate. It is FIXABLE.&#10;&#10;NOT AUTHORISED IN THE EU&#10;   The substance is not on the permitted list at all, anywhere.&#10;   There is no reformulation that fixes it. It is a DEAD END.&#10;&#10;A naive lookup would report both as &quot;not found&quot;.&#10;Telling someone their product is unsalvageable when they just need&#10;to move an ingredient is a serious error." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="235" width="560" height="230" as="geometry" /></mxCell>
+
+        <mxCell id="three" value="IT CHECKS ALL THREE CANDIDATE CATEGORIES, NOT JUST ONE&#10;&#10;Because category matching is only 53% right first time, the engine&#10;works out the verdict under EVERY candidate — then compares them.&#10;&#10;   all three agree     →  the verdict is certain&#10;   they disagree       →  the verdict DEPENDS ON THE CATEGORY&#10;&#10;A category-dependent block is NOT reported as blocked. It is reported as:&#10;&#10;   &quot;not permitted under 11.1 sugars, permitted under 7.2 bakery wares —&#10;    confirm the category before treating this as a failure&quot;&#10;&#10;WHY WE ADDED THIS&#10;Parle-G originally reported 3 items NOT PERMITTED. We had already&#10;worked out by hand that all three ARE permitted. The category was wrong&#10;and the engine reported the wrong answer with full confidence." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="455" width="560" height="290" as="geometry" /></mxCell>
+
+        <mxCell id="par" value="THE FAMILY FALLBACK&#10;&#10;EU law often records a permission for a whole family, not each member.&#10;&#10;   500     &quot;sodium carbonates&quot;          104 rows, including bakery&#10;   500(ii) &quot;sodium hydrogen carbonate&quot;    2 rows, none in bakery&#10;&#10;500(ii) is baking soda. A biscuit obviously contains it.&#10;Looking up 500(ii) alone finds nothing and would report&#10;&quot;not permitted&quot; — telling a manufacturer their biscuit fails&#10;on bicarbonate of soda.&#10;&#10;So before declaring a failure, we try the family: 500(ii) → 500.&#10;And we flag that we did, so a reviewer can see it." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="495" width="560" height="250" as="geometry" /></mxCell>
+
+        <mxCell id="cond" value="THE CONDITIONS — 96% OF ROWS HAVE THEM&#10;&#10;Almost every permission comes with text attached:&#10;&#10;   &quot;only tuna&quot;&#10;   &quot;only fat-containing cereal-based foods including biscuits and rusks&quot;&#10;   &quot;Note 18: E 300, E 301 and E 302 are authorised individually or in&#10;    combination&quot;&#10;&#10;We do NOT try to interpret these. We show them, word for word,&#10;and let the reader decide.&#10;&#10;WHY NOT PARSE THEM&#10;This is prose written by lawyers, with exceptions inside exceptions.&#10;A parser that gets it 90% right is worse than no parser, because the&#10;10% is invisible. Showing the text is honest." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="775" width="560" height="270" as="geometry" /></mxCell>
+
+        <mxCell id="cite" value="EVERY VERDICT CARRIES ITS SOURCE&#10;&#10;   where the rule came from  (a link to the EU portal)&#10;   when it entered force&#10;   the conditions, in full&#10;   which category was used, and whether a person confirmed it&#10;&#10;If a row somehow has no source link, the verdict is flagged as&#10;uncitable rather than presented as if it were grounded.&#10;&#10;AND ONE THING IT NEVER SAYS&#10;&#10;&quot;This product is cleared for export.&quot;&#10;&#10;A label tells you an additive is PRESENT. It does not tell you&#10;HOW MUCH was used. Half the permissions have numeric limits that&#10;a label simply cannot verify. The system says so, every time." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="775" width="560" height="270" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="6 · Steps 6 Extras and write-up" id="step6">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1250" pageHeight="1150" math="0" shadow="0">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="Step 6 — Extras, and writing it up" style="text;html=1;fontSize=22;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" /></mxCell>
+
+        <mxCell id="sub" value="SUBSTITUTES — what could replace a blocked additive&#10;&#10;For anything genuinely blocked, find alternatives that:&#10;&#10;   do the same JOB          (a colour must be replaced by a colour)&#10;   are allowed in the SAME food category&#10;   are allowed at the same level or higher&#10;   do not bring a new warning label with them&#10;&#10;Real result: Fast Green FCF is blocked in a khus syrup.&#10;The system proposes chlorophylls (E140) — a green colour, permitted.&#10;&#10;And the honest caveat, stated every time:&#10;&#10;   Doing the same job is not the same as being interchangeable.&#10;   Titanium dioxide's opacity is famously hard to replace, which is&#10;   why the industry struggled after it was banned in 2022.&#10;   These are CANDIDATES for a formulator to test, not recommendations." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="560" height="310" as="geometry" /></mxCell>
+
+        <mxCell id="hor" value="HORIZON — what might change soon&#10;&#10;An additive can be legal today and banned in three years.&#10;Titanium dioxide is the example everyone knows:&#10;&#10;   2016  the EU food safety authority starts re-examining it&#10;   2021  it publishes: no longer considered safe&#10;   2022  it is banned&#10;&#10;For those six years the correct verdict was &quot;permitted&quot;.&#10;But a manufacturer building a product line on it would have&#10;wanted to know it was under review.&#10;&#10;THE RULE THIS LANE OBEYS&#10;&#10;   It can raise a flag. It can NEVER change a verdict.&#10;   A safety opinion is not law. There is a test that asserts this.&#10;&#10;It also stops the substitute advisor recommending a replacement&#10;that is itself under review." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="80" width="560" height="330" as="geometry" /></mxCell>
+
+        <mxCell id="nar" value="THE WRITE-UP — the one place an AI model writes for a person&#10;&#10;It receives the FINISHED assessment and rewrites it in plain English.&#10;It looks nothing up. It adds no facts. It decides nothing.&#10;&#10;It is told:&#10;   never write &quot;banned&quot; — write &quot;not authorised as a food additive&quot;&#10;   never claim the product is cleared for export&#10;   explain jargon on first use&#10;   say if the category was not confirmed by a person&#10;&#10;THEN WE CHECK IT&#10;&#10;Every E-number, every level, every category code in the prose must&#10;appear in the data we handed it. Anything that does not is recorded.&#10;&#10;If the model is unavailable, we fall back to a fixed summary rather&#10;than showing nothing." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="420" width="560" height="300" as="geometry" /></mxCell>
+
+        <mxCell id="ag" value="THE ASSISTANT — for items nobody could identify&#10;&#10;Some items end up needing a person. About 20 across our test labels.&#10;Each needs a DIFFERENT approach:&#10;&#10;   &quot;modified cornstarch&quot;  17 possible matches — needs narrowing&#10;   &quot;INS 924&quot;              in no reference data — needs a web search&#10;   &quot;Hazelnut Pieces&quot;      is it food or an additive? — needs a lookup&#10;&#10;So this one IS an agent: it chooses which tool to use per item.&#10;A fixed sequence would do the same thing to all of them.&#10;&#10;IT PROPOSES. A PERSON DECIDES.&#10;&#10;Measured on 22 items:&#10;   15  correct&#10;    0  WRONG          ← the number that matters&#10;    4  correctly said &quot;I cannot tell from this label&quot;&#10;    3  gave up for technical reasons&#10;&#10;A wrong suggestion is dangerous because someone might accept it.&#10;Declining just leaves work undone. We never combine the two into&#10;a single accuracy figure." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="440" width="560" height="380" as="geometry" /></mxCell>
+
+        <mxCell id="out" value="WHAT YOU GET AT THE END&#10;&#10;On screen, or as JSON, CSV, PDF, or an email:&#10;&#10;   a plain-English summary&#10;   what is blocked, and why&#10;   what is permitted, with the conditions in full&#10;   what depends on the category&#10;   what needs a person to look at&#10;   what was never assessed, and under which other regulation&#10;   suggested replacements&#10;   anything under review&#10;&#10;Every one of those carries its source link and its caveats.&#10;The PDF carries them too — it is the one people forward." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="750" width="560" height="290" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="7 · Problems and fixes" id="problems">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1300" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="Problems we hit, and what we did about them" style="text;html=1;fontSize=22;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="800" height="30" as="geometry" /></mxCell>
+        <mxCell id="t2" value="Every one of these was found by running the system on real labels, not by reasoning about it beforehand." style="text;html=1;fontSize=13;fontColor=#555555;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="900" height="20" as="geometry" /></mxCell>
+
+        <mxCell id="p1" value="THE WEBSITE BLOCKED US&#10;&#10;PROBLEM  The international additive database returned &quot;403 Forbidden&quot;&#10;         and its robots file forbids automated access to every page&#10;         we needed.&#10;&#10;FIX      The same organisation publishes the whole standard as a PDF,&#10;         at a URL the block does not cover. We parsed 140 pages instead.&#10;&#10;RESULT   668 records, zero validation failures. And a BETTER source —&#10;         one dated document instead of 400 scraped pages." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="95" width="600" height="200" as="geometry" /></mxCell>
+
+        <mxCell id="p2" value="THE MODEL'S CONFIDENCE WAS MEANINGLESS&#10;&#10;PROBLEM  It said 0.0 while confidently identifying a food label.&#10;         Every extracted item came back at exactly 1.0.&#10;&#10;FIX      Stopped asking. We compute it from countable evidence.&#10;&#10;RESULT   A number we can explain. &quot;2 of 5 markers found&quot; is defensible;&#10;         &quot;0.87 because the model said so&quot; is not." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="95" width="580" height="200" as="geometry" /></mxCell>
+
+        <mxCell id="p3" value="A FEATURE WE ADDED MADE THINGS WORSE&#10;&#10;PROBLEM  We cropped the photo to just the ingredients panel and&#10;         enlarged it, on the reasonable theory that small print needs&#10;         more pixels.&#10;&#10;MEASURED Across 10 labels it changed NOTHING where it worked — and on&#10;         one label it cropped the wrong part of the pack and returned&#10;         ZERO items instead of 25.&#10;&#10;FIX      Turned it off. Kept the code behind a flag.&#10;&#10;RESULT   A component removed because we measured it, not because we&#10;         guessed. That is a better story than a feature that worked." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="325" width="600" height="240" as="geometry" /></mxCell>
+
+        <mxCell id="p4" value="WORD-MATCHING RULES KEPT FAILING&#10;&#10;Three separate times, a sensible-looking rule broke:&#10;&#10;   &quot;ising → izing&quot; to handle UK spelling&#10;   turned &quot;raising agent&quot; into &quot;raizing agent&quot;&#10;&#10;   a check for &quot;flavour enhancer&quot; missed the plural on a label&#10;&#10;   a check for the word &quot;flavour&quot; matched &quot;flavour enhancer&quot;&#10;   and marked two REAL additives as out of scope&#10;&#10;FIX      Each time: replace the clever pattern with an explicit list,&#10;         or with a lookup against authoritative data.&#10;&#10;LESSON   Regulatory vocabulary defeats general text rules." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="325" width="580" height="270" as="geometry" /></mxCell>
+
+        <mxCell id="p5" value="THE SYSTEM SAID A PRODUCT WAS FINE WHEN IT WAS NOT&#10;&#10;PROBLEM  A khus syrup contains Fast Green FCF, which is not authorised&#10;         in the EU at all. The system reported:&#10;         &quot;No item was found not permitted.&quot;&#10;&#10;CAUSE    The resolver correctly distinguished &quot;we identified it and it&#10;         is not in EU law&quot; from &quot;we could not identify it&quot;.&#10;         The verdict step collapsed both into &quot;unresolved&quot; with a&#10;         single OR condition.&#10;&#10;WHY IT MATTERED&#10;         Each stage passed its OWN tests. Only running a real label with&#10;         a genuinely unauthorised additive exposed it.&#10;&#10;FIX      Split the branch. Added a test asserting the summary can never&#10;         report a clean result when a blocking item is present.&#10;&#10;This is the strongest argument in the project for end-to-end testing." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="595" width="600" height="330" as="geometry" /></mxCell>
+
+        <mxCell id="p6" value="ONE ADDITIVE, TWO PLACES, ONE ANSWER&#10;&#10;PROBLEM  An ice cream declares maltitol twice — once in the ice cream,&#10;         once in the chocolate coating. Both came back labelled&#10;         &quot;Outer Layer&quot; with the same category.&#10;&#10;CAUSE    The lookup was keyed on the ADDITIVE, not on the ITEM.&#10;         Two entries for maltitol collapsed onto one decision.&#10;&#10;FIX      Key everything on item_id and walk each item's own parents.&#10;&#10;RESULT   Two declarations, two components, two categories — correctly." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="625" width="580" height="230" as="geometry" /></mxCell>
+
+        <mxCell id="p7" value="THE MEASUREMENT WE WERE USING WAS WRONG&#10;&#10;We had a diagnostic that measured how &quot;spread out&quot; the 155 category&#10;descriptions were. We treated a low spread as the ceiling on accuracy.&#10;&#10;Then we tested it properly. One corpus version had the BEST spread and&#10;the WORST accuracy. The number moved in the wrong direction.&#10;&#10;FIX      Stopped using it to judge anything. Scored everything against&#10;         hand-checked answers instead.&#10;&#10;LESSON   A proxy metric that has not been validated against ground truth&#10;         can be actively misleading — and we had been reasoning from it&#10;         for several days." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="955" width="600" height="250" as="geometry" /></mxCell>
+
+        <mxCell id="p8" value="A DATASET WE COULD NOT USE&#10;&#10;PROBLEM  The EU food safety authority publishes all its assessments as&#10;         a downloadable file. We wanted it for the &quot;what is changing&quot;&#10;         feature.&#10;&#10;WHAT WE FOUND&#10;         18 linked sheets, joined by internal IDs, keyed on chemical&#10;         registry numbers. NO E-numbers anywhere. Our entire system is&#10;         built on E-numbers, and nothing we have links the two.&#10;&#10;FIX      Abandoned automated loading. Built a small hand-checked list&#10;         instead, and documented why — including that it is partial,&#10;         on every single screen.&#10;&#10;LESSON   &quot;The data exists&quot; and &quot;the data is usable&quot; are different claims." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="885" width="580" height="290" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="8 · Numbers" id="numbers">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1250" pageHeight="1150" math="0" shadow="0">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="How we measured it" style="text;html=1;fontSize=22;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" /></mxCell>
+        <mxCell id="t2" value="Each step has its own hand-checked answer set and its own score. Change something, re-run, see if it broke." style="text;html=1;fontSize=13;fontColor=#555555;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="900" height="20" as="geometry" /></mxCell>
+
+        <mxCell id="how" value="HOW IT WORKS&#10;&#10;Two folders with the same filenames:&#10;&#10;   data/golden/   the RIGHT answer, written by hand, never regenerated&#10;   data/outputs/  what the system produced this time&#10;&#10;A script compares them and prints a score. If the score drops, the&#10;script exits with an error — so a change that breaks something fails&#10;loudly instead of silently." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#666666;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="95" width="560" height="200" as="geometry" /></mxCell>
+
+        <mxCell id="sc" value="THE SCORES&#10;&#10;READING THE LABEL&#10;   57 of 57 additive codes found across the test labels.  1.00&#10;&#10;IDENTIFYING WHAT THEY ARE&#10;   202 items. Number, EU code and classification all 1.00&#10;&#10;FINDING THE FOOD CATEGORY&#10;   right first:  0.53      right in top three:  0.82&#10;   The weak point, and the reason a person confirms.&#10;&#10;THE ASSISTANT&#10;   22 items:  15 correct  ·  0 WRONG  ·  4 correctly declined&#10;&#10;THE WHOLE PIPELINE END TO END&#10;   Not measured. It would need expert-verified categories, which&#10;   we do not have. Stated as a limitation rather than estimated." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="95" width="600" height="310" as="geometry" /></mxCell>
+
+        <mxCell id="exp" value="WHAT WE TESTED AND REJECTED&#10;&#10;Every one of these was built, measured, and then NOT adopted:&#10;&#10;   cropping the photo         no gain, one total failure  →  removed&#10;   keyword search             0.24 vs 0.59                →  rejected&#10;   a vector database          identical results, slower   →  not adopted&#10;   combining both searches    0.76 vs 0.82                →  rejected&#10;   seven ways of rewriting the category descriptions&#10;                              all worse than the original →  rejected&#10;   diversifying results       no measurable change        →  rejected&#10;&#10;Twenty-plus configurations logged in one spreadsheet, each tagged with&#10;which version of the answer key it was scored against — because we&#10;once compared two runs scored against DIFFERENT answer keys and&#10;briefly believed we had found an improvement." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="325" width="560" height="290" as="geometry" /></mxCell>
+
+        <mxCell id="cav" value="WHAT WE ARE NOT CLAIMING&#10;&#10;   The test set is 12 labels. That is small.&#10;&#10;   The correct food categories were drafted with AI help and not&#10;   verified by a regulatory expert. So the category numbers are&#10;   useful for comparing configurations against each other, but they&#10;   are not a validated accuracy claim.&#10;&#10;   All the labels are Indian. The multilingual handling built for&#10;   European packs was never exercised.&#10;&#10;   The system reads what a label DECLARES. It cannot detect anything&#10;   undeclared — adulterants, contamination, or an additive someone&#10;   simply left off the pack. That needs laboratory analysis." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#943126;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="640" y="435" width="600" height="290" as="geometry" /></mxCell>
+
+        <mxCell id="fin" value="THE SHAPE OF THE WHOLE THING, IN ONE PARAGRAPH&#10;&#10;A model reads the photo. Fixed lookups work out what each ingredient is.&#10;A search suggests what kind of food it is, and a person confirms that,&#10;because the search is right first time only about half the time and the&#10;answer depends on it. A database lookup produces the verdict, with a&#10;link to the law and the conditions in full. Extras suggest replacements&#10;and flag what might change. A model writes it up, and a checker confirms&#10;it invented nothing.&#10;&#10;Models at the edges. A lookup in the middle. A person at the point where&#10;the measurement said one was needed." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#333333;fontSize=13;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="655" width="1200" height="230" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+</mxfile>

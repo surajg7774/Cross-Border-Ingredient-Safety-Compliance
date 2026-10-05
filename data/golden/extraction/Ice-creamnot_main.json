@@ -1,0 +1,21 @@
+{
+  "gate": {
+    "is_food_label": true,
+    "has_ingredients_declaration": false,
+    "confidence": 0.2,
+    "evidence_found": [
+      "nutrition_table"
+    ],
+    "reject_reason": null,
+    "product_name": null,
+    "product_descriptor": null,
+    "languages_detected": [
+      "en"
+    ],
+    "language_selected": "en",
+    "ingredients_panel_bbox": null,
+    "warnings": []
+  },
+  "extraction": null,
+  "stop_reason": "food label detected but no ingredients declaration visible \u2014 please photograph the ingredients panel."
+}

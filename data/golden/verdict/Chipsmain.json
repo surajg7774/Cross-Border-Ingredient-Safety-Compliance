@@ -1,0 +1,132 @@
+{
+  "label": "Chipsmain",
+  "pin_status": "REVIEWED against verdict_truth_draft.md and eu_fip evidence -- see docs/findings.md for the full cross-check (which pins changed from rank-1 and why). Any pin NOT listed as changed there is confirmed unchanged from the scaffolder's rank-1 provisional value, also reviewed.",
+  "pinned_categories": {
+    "Seasoning": {
+      "code": "12.2.2",
+      "name": "Seasonings and condiments"
+    },
+    "(product)": {
+      "code": "15.1",
+      "name": "Potato- cereal- flour- or starch-based snacks"
+    }
+  },
+  "items": [
+    {
+      "item_id": 0,
+      "verbatim": "Potato (57%)",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 1,
+      "verbatim": "Edible Vegetable Oil (Rice Bran Oil)",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 2,
+      "verbatim": "Rice Bran Oil",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    },
+    {
+      "item_id": 3,
+      "verbatim": "Seasoning [+Spices and Condiments (Contains Chilli), Iodised Salt, Sugar, Maltodextrin, Natural and Nature Identical Flavouring Substances, Anticaking Agent (INS 470(i), INS 551)), Starch, Flavour Enhancers (INS 627, INS 631), Acidity Regulator (INS 330), Emulsifying and Stabilizing Agent (INS 471)]",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    },
+    {
+      "item_id": 4,
+      "verbatim": "+Spices and Condiments (Contains Chilli)",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    },
+    {
+      "item_id": 5,
+      "verbatim": "Iodised Salt",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 6,
+      "verbatim": "Sugar",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 7,
+      "verbatim": "Maltodextrin",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 8,
+      "verbatim": "Natural and Nature Identical Flavouring Substances",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 9,
+      "verbatim": "INS 470(i)",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    },
+    {
+      "item_id": 10,
+      "verbatim": "INS 551",
+      "headline": "permitted_with_conditions",
+      "eu_canonical_id": "551",
+      "blocked": false
+    },
+    {
+      "item_id": 11,
+      "verbatim": "Starch",
+      "headline": "out_of_scope",
+      "eu_canonical_id": null,
+      "blocked": false
+    },
+    {
+      "item_id": 12,
+      "verbatim": "INS 627",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    },
+    {
+      "item_id": 13,
+      "verbatim": "INS 631",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    },
+    {
+      "item_id": 14,
+      "verbatim": "INS 330",
+      "headline": "permitted_with_conditions",
+      "eu_canonical_id": "330",
+      "blocked": false
+    },
+    {
+      "item_id": 15,
+      "verbatim": "INS 471",
+      "headline": "UNSET",
+      "eu_canonical_id": "UNSET",
+      "blocked": "UNSET"
+    }
+  ],
+  "truth_disclosure": {
+    "review_status": "AI-DRAFTED, CROSS-CHECKED AGAINST eu_fip.json, NOT VERIFIED BY A REGULATORY EXPERT",
+    "note": "Filled values originated as an independent AI reading of the label image (verdict_truth_draft.md, written without looking at pipeline output), then cross-checked item-by-item against the actual eu_fip rows for the pinned category. Only items where the draft marked HIGH confidence AND the eu_fip rows agreed with its claim were filled -- MED-confidence agreements, UNSET/declined items, and items the draft never addressed are left UNSET on purpose. Do not treat this as validated ground truth; correct by hand against the actual Annex II text before relying on it as a regression baseline, same discipline data/golden/category_truth.json's own _meta carries."
+  }
+}

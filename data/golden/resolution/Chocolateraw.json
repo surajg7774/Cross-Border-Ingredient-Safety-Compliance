@@ -1,0 +1,399 @@
+{
+  "items": [
+    {
+      "item_id": 0,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 1,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Sugar"
+    },
+    {
+      "item_id": 2,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Milk Solids"
+    },
+    {
+      "item_id": 3,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Cocoa Butter"
+    },
+    {
+      "item_id": 4,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Cocoa Solids"
+    },
+    {
+      "item_id": 5,
+      "canonical_ins": "442",
+      "eu_canonical_id": "442",
+      "classification": "additive",
+      "normalised_role": "Emulsifier",
+      "codex_functional_classes": [
+        "Emulsifier"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "442"
+    },
+    {
+      "item_id": 6,
+      "canonical_ins": "476",
+      "eu_canonical_id": "476",
+      "classification": "additive",
+      "normalised_role": "Emulsifier",
+      "codex_functional_classes": [
+        "Emulsifier"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "476"
+    },
+    {
+      "item_id": 7,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [
+        "out_of_annex_ii_scope"
+      ],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 8,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "flavouring",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.95,
+      "flags": [
+        "out_of_annex_ii_scope"
+      ],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 9,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 10,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 11,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 12,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Refined Wheat Flour"
+    },
+    {
+      "item_id": 13,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Sugar"
+    },
+    {
+      "item_id": 14,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Palmolein"
+    },
+    {
+      "item_id": 15,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Invert Sugar"
+    },
+    {
+      "item_id": 16,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Cocoa Solids"
+    },
+    {
+      "item_id": 17,
+      "canonical_ins": "500(ii)",
+      "eu_canonical_id": "500(ii)",
+      "classification": "additive",
+      "normalised_role": "Raising agent",
+      "codex_functional_classes": [
+        "Acidity regulator",
+        "Anticaking agent",
+        "Raising agent",
+        "Stabilizer",
+        "Thickener"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "500(ii)"
+    },
+    {
+      "item_id": 18,
+      "canonical_ins": "503(ii)",
+      "eu_canonical_id": "503",
+      "classification": "additive",
+      "normalised_role": "Raising agent",
+      "codex_functional_classes": [
+        "Acidity regulator",
+        "Raising agent"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [
+        "eu_widened_to_parent"
+      ],
+      "candidates": [],
+      "matched_on": "503(ii)"
+    },
+    {
+      "item_id": 19,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Iodised Salt"
+    },
+    {
+      "item_id": 20,
+      "canonical_ins": "322",
+      "eu_canonical_id": "322",
+      "classification": "additive",
+      "normalised_role": "Emulsifier",
+      "codex_functional_classes": [],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "322"
+    },
+    {
+      "item_id": 21,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [
+        "out_of_annex_ii_scope"
+      ],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 22,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "flavouring",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.95,
+      "flags": [
+        "out_of_annex_ii_scope"
+      ],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 23,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Sugar"
+    },
+    {
+      "item_id": 24,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Milk Solids"
+    },
+    {
+      "item_id": 25,
+      "canonical_ins": "442",
+      "eu_canonical_id": "442",
+      "classification": "additive",
+      "normalised_role": "Emulsifier",
+      "codex_functional_classes": [
+        "Emulsifier"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "442"
+    },
+    {
+      "item_id": 26,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [
+        "out_of_annex_ii_scope"
+      ],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 27,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "flavouring",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.95,
+      "flags": [
+        "out_of_annex_ii_scope"
+      ],
+      "candidates": [],
+      "matched_on": null
+    }
+  ],
+  "warnings": [],
+  "index_version": "178af7a7517d"
+}

@@ -1,0 +1,45 @@
+# Theme for the compliance-checker UI. Defines BOTH [theme.light] and
+# [theme.dark] (not a single [theme] block) -- Streamlit only offers the
+# Light/Dark/"Use system setting" choice in its Settings menu when both are
+# present; a bare [theme] with hardcoded colours locks the app to one mode
+# and removes the user's ability to override it, which the app must not do.
+#
+# Colours mirror src/ui/styles.py's --ink/--paper/--permitted/--blocked/
+# --conflict exactly, so Streamlit's own native chrome (buttons, inputs,
+# the Settings menu itself) matches this app's custom HTML/CSS surfaces in
+# both modes. See src/ui/styles.py's module docstring for why the CSS side
+# has to track this separately (prefers-color-scheme) rather than reading
+# Streamlit's theme directly -- this installed version exposes no usable
+# CSS variable for it outside Streamlit's own components.
+
+[theme.light]
+backgroundColor = "#FBFBF9"
+secondaryBackgroundColor = "#F1F0EC"
+textColor = "#14161A"
+primaryColor = "#14161A"
+borderColor = "#D8D6D0"
+codeBackgroundColor = "#F1F0EC"
+codeTextColor = "#14161A"
+greenColor = "#2F6B4F"
+redColor = "#9B2C2C"
+yellowColor = "#8A6D1F"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap"
+codeFont = "'SF Mono', 'Cascadia Mono', monospace"
+baseRadius = "none"
+buttonRadius = "none"
+
+[theme.dark]
+backgroundColor = "#14161A"
+secondaryBackgroundColor = "#1D2027"
+textColor = "#FBFBF9"
+primaryColor = "#FBFBF9"
+borderColor = "#3A3D44"
+codeBackgroundColor = "#1D2027"
+codeTextColor = "#FBFBF9"
+greenColor = "#6FBF95"
+redColor = "#E08585"
+yellowColor = "#D9B65C"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap"
+codeFont = "'SF Mono', 'Cascadia Mono', monospace"
+baseRadius = "none"
+buttonRadius = "none"

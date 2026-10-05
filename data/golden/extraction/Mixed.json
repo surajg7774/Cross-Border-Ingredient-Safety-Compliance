@@ -1,0 +1,97 @@
+{
+  "gate": {
+    "is_food_label": true,
+    "has_ingredients_declaration": true,
+    "confidence": 1.0,
+    "evidence_found": [
+      "text_input"
+    ],
+    "reject_reason": null,
+    "product_name": "Mixed",
+    "product_descriptor": null,
+    "languages_detected": [
+      "en"
+    ],
+    "language_selected": "en",
+    "ingredients_panel_bbox": null,
+    "warnings": [
+      "input was pasted text, not a photographed label — no gate validation was performed"
+    ]
+  },
+  "extraction": {
+    "declaration_verbatim": "INS 143, INS 924, soy lecithin, INS 171",
+    "language": "en",
+    "items": [
+      {
+        "item_id": 0,
+        "position": 0,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "INS 143",
+        "name_as_declared": null,
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": "INS 143",
+        "code_system": "INS",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 1,
+        "position": 1,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "INS 924",
+        "name_as_declared": null,
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": "INS 924",
+        "code_system": "INS",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 2,
+        "position": 2,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "soy lecithin",
+        "name_as_declared": "soy lecithin",
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": null,
+        "code_system": "none",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      },
+      {
+        "item_id": 3,
+        "position": 3,
+        "nesting_depth": 0,
+        "parent_item_id": null,
+        "verbatim": "INS 171",
+        "name_as_declared": null,
+        "declared_role": null,
+        "role_source": "none",
+        "declared_code": "INS 171",
+        "code_system": "INS",
+        "percentage": null,
+        "emphasis": false,
+        "footnote_marker": null,
+        "confidence": 1.0
+      }
+    ],
+    "unparsed_fragments": [],
+    "warnings": [],
+    "allergen_statements": [],
+    "footnotes": {},
+    "declaration_statements": []
+  },
+  "stop_reason": null
+}

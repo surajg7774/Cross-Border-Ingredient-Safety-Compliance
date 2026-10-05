@@ -1,0 +1,258 @@
+<mxfile host="app.diagrams.net" modified="2026-08-02T20:00:00.000Z" agent="architecture" version="24.0.0">
+  <diagram name="Pipeline" id="pipeline">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="1700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="EU Food Additive Compliance Screening — Pipeline" style="text;html=1;fontSize=20;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Indian FSSAI label → EU Annex II verdict.  Purple = model involved.  Teal = deterministic.  Amber = human or advisory." style="text;html=1;fontSize=12;fontColor=#666666;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="48" width="800" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- INPUT -->
+        <mxCell id="input" value="INPUT&#10;&#10;Label photo (jpg/png) or pasted ingredients text&#10;bytes — no schema yet" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;align=center;verticalAlign=middle;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="300" y="90" width="420" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- STAGE 1 -->
+        <mxCell id="s1" value="1 · EXTRACTION&#10;src/extract/&#10;&#10;Gemini VLM · two calls: gate, then extract&#10;Schema-validated, retry on failure, cached&#10;&#10;OUT → data/outputs/extraction/X.json&#10;ExtractedItem: declared_code, name_as_declared,&#10;declared_role, code_system, nesting_depth, parent_item_id" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="185" width="420" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g1" value="GUARDS&#10;&#10;not a food label → stop&#10;no ingredients list → stop&#10;zero items → stop" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;align=left;fontSize=10;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="760" y="200" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="g1e" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#B7950B;" edge="1" parent="1" source="s1" target="g1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- STAGE 2 -->
+        <mxCell id="s2" value="2 · RESOLUTION&#10;src/resolve/&#10;&#10;Deterministic cascade — NO model&#10;code path → parent fallback&#10;name path: exact → synonym → alias → FOOD LEXICON → fuzzy&#10;family guard (472a-f, 160a-f, 306-309…) → forced review&#10;&#10;OUT → data/outputs/resolution/X.json&#10;canonical_ins, eu_canonical_id, classification, confidence" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="345" width="420" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- STAGE 3 -->
+        <mxCell id="s3" value="3 · FOOD CATEGORY&#10;src/category/&#10;&#10;Retrieval over 155 EU categories · gemini-embedding-001, 768d&#10;One query PER COMPONENT (product + each compound with additives)&#10;Intersection filter over eu_fip permissions&#10;&#10;OUT → data/outputs/category/X.json&#10;top-3 candidates with scores, per component&#10;&#10;MEASURED: recall@1 = 0.53   recall@3 = 0.82" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="525" width="420" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- HUMAN -->
+        <mxCell id="human" value="HUMAN CONFIRMS THE CATEGORY&#10;&#10;LangGraph interrupt() — execution pauses, state checkpointed&#10;Command(resume={component: code}) continues&#10;&#10;Required because recall@1 = 0.53 and the category determines the verdict" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;align=center;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="300" y="705" width="420" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- STAGE 4 -->
+        <mxCell id="s4" value="4 · RULE ENGINE&#10;src/rules/&#10;&#10;Deterministic join on (eu_canonical_id, fcs_code) → eu_fip&#10;Evaluates ALL 3 candidate categories, flags divergence&#10;Prohibition and absence are category-INDEPENDENT&#10;Parent fallback: 500(ii) → 500&#10;&#10;OUT → data/outputs/verdict/X.json&#10;headline, by_category[], source_url, retrieved_date, conditions" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="835" width="420" height="140" as="geometry" />
+        </mxCell>
+
+        <mxCell id="verdicts" value="VERDICT STATES&#10;&#10;permitted_qs&#10;permitted_with_limit&#10;permitted_with_conditions  ← 96% of rows&#10;not_permitted_in_category  ← fixable&#10;not_authorised_eu  ← dead end&#10;out_of_scope&#10;unresolved&#10;category_unknown" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#148F77;align=left;fontSize=10;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="760" y="835" width="230" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="ve" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#148F77;" edge="1" parent="1" source="s4" target="verdicts">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- STAGE 5 split -->
+        <mxCell id="s5a" value="5a · SUBSTITUTES&#10;src/substitutes/&#10;&#10;For each BLOCKED additive:&#10;same Codex functional class&#10;permitted in same category&#10;level ≥ original&#10;no new labelling obligation&#10;&#10;Candidates, not recommendations" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="180" y="1015" width="290" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s5b" value="5b · HORIZON&#10;src/horizon/&#10;&#10;EFSA signals, curated dataset&#10;affects_verdict = False ALWAYS&#10;asserted in a test&#10;&#10;Feeds the substitute filter:&#10;never propose a replacement&#10;that is itself under review" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="550" y="1015" width="290" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="negfilter" value="negative filter" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#B7950B;fontSize=10;" edge="1" parent="1" source="s5b" target="s5a">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- STAGE 6 -->
+        <mxCell id="s6" value="6 · NARRATION&#10;src/report/narrator.py&#10;&#10;LLM turns the finished assessment into prose&#10;Decides NOTHING — adds no facts&#10;Faithfulness check: every E-number, level and category code&#10;in the prose must appear in the structured input&#10;Deterministic fallback if the model is unavailable" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="1185" width="420" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- OUTPUT -->
+        <mxCell id="out" value="OUTPUT&#10;&#10;JSON · CSV · PDF · opt-in email&#10;Every verdict carries source URL, in-force date, and its caveats" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;align=center;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="300" y="1345" width="420" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- REFERENCE DATA -->
+        <mxCell id="ref" value="REFERENCE DATA  (data/reference/)&#10;loaded once, passed IN as arguments&#10;&#10;codex_ins.json — 668 INS records, from the CXG 36 PDF&#10;functional_classes.json — 27 classes + synonyms&#10;label_aliases.json — 66 verified aliases, 12 ambiguous, food lexicon&#10;food_categories.json — 155 EU categories&#10;eu_fip.json — 18,987 permission rows (Annex II Part E)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#666666;align=left;fontSize=10;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="30" y="400" width="250" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="re1" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#666666;" edge="1" parent="1" source="ref" target="s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re2" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#666666;" edge="1" parent="1" source="ref" target="s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re3" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#666666;" edge="1" parent="1" source="ref" target="s4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- AGENT -->
+        <mxCell id="agent" value="AGENT — review queue resolver&#10;src/agent/  ·  LangGraph tool loop, step cap 5&#10;&#10;Runs ON DEMAND on unresolved / ambiguous items&#10;Tools: lookup_codex, lookup_eu_fip, check_food_lexicon,&#10;list_family_members, get_product_context, search_web&#10;&#10;Output is a PROPOSAL — a human confirms it&#10;MEASURED: 22 items → 15 correct, 0 wrong, 4 correctly declined" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;align=center;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="760" y="1015" width="300" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="ae" value="on demand" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#7D3C98;fontSize=10;" edge="1" parent="1" source="s4" target="agent">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- EDGES -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="input" target="s1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s1" target="s2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s2" target="s3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s3" target="human"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="human" target="s4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s4" target="s5a"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s4" target="s5b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s5a" target="s6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s5b" target="s6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;" edge="1" parent="1" source="s6" target="out"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="note" value="STAGE BOUNDARY RULE&#10;Stages communicate through JSON files on disk, never function calls.&#10;A stage may import its own schemas and the previous stage's schemas — nothing else.&#10;Core logic is pure: data in, data out. Scripts do all I/O.&#10;This is why 20+ retrieval configs could be measured while extraction ran once." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#999999;align=left;fontSize=10;spacingLeft=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="30" y="1345" width="250" height="120" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="LangGraph" id="langgraph">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="lgtitle" value="LangGraph orchestration — src/graph/" style="text;html=1;fontSize=20;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="600" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lgsub" value="Drives both scripts/run_pipeline.py and app.py.  Nodes call the same pure functions the standalone scripts call." style="text;html=1;fontSize=12;fontColor=#666666;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="48" width="800" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="start" value="START" style="ellipse;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="440" y="95" width="120" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n1" value="extract_node&#10;run_extraction" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="420" y="165" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n2" value="resolve_node&#10;resolve_items" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="420" y="245" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sendlbl" value="Send — one dispatch per component" style="text;html=1;fontSize=11;fontColor=#7D3C98;align=center;" vertex="1" parent="1">
+          <mxGeometry x="380" y="305" width="240" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c1" value="classify_node&#10;product" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="180" y="335" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" value="classify_node&#10;component A" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="425" y="335" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="c3" value="classify_node&#10;component B" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="670" y="335" width="150" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="conf" value="confirm_node — interrupt()&#10;execution pauses · state checkpointed" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="380" y="425" width="240" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="hum" value="human picks&#10;a category" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="690" y="425" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="resume" value="Command(resume=…)" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#B7950B;fontSize=10;" edge="1" parent="1" source="hum" target="conf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n4" value="verdict_node&#10;evaluate" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="420" y="525" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n5a" value="substitutes_node&#10;find_substitutes" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="260" y="615" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="n5b" value="horizon_node&#10;find_horizon_signals" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="560" y="615" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="parlbl" value="parallel branches" style="text;html=1;fontSize=10;fontColor=#666666;align=center;" vertex="1" parent="1">
+          <mxGeometry x="440" y="588" width="120" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n6" value="narrate_node&#10;narrate" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="420" y="705" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="end" value="END" style="ellipse;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="440" y="785" width="120" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="le1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="start" target="n1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le2" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n1" target="n2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le3" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n2" target="c1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le4" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n2" target="c2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le5" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n2" target="c3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le6" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="c1" target="conf"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le7" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="c2" target="conf"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le8" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="c3" target="conf"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le9" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="conf" target="n4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le10" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n4" target="n5a"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le11" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n4" target="n5b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le12" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n5a" target="n6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le13" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n5b" target="n6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="le14" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n6" target="end"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="lgnote" value="WHY LANGGRAPH&#10;&#10;Category recall@1 = 0.53. Twenty-plus retrieval configurations were&#10;measured and none improved it, so human confirmation is a design&#10;requirement, not a fallback.&#10;&#10;interrupt() replaces hand-rolled pause/resume that previously existed&#10;twice: a --category CLI flag applied AFTER a wrong verdict, and&#10;Streamlit session-state with a stage marker and a full script rerun.&#10;&#10;It fires PER COMPONENT — two independent pauses on a composite label,&#10;each separately resumable." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#999999;align=left;fontSize=10;spacingLeft=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="500" width="290" height="200" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="Data shapes" id="datashapes">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="dtitle" value="Data shape at each stage boundary" style="text;html=1;fontSize=20;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="600" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="dsub" value="Nothing is copied forward. Each stage adds a NEW record keyed on item_id, so adding a field upstream cannot break downstream." style="text;html=1;fontSize=12;fontColor=#666666;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="48" width="900" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="d1" value="ExtractedItem  —  what is PRINTED&#10;&#10;item_id            10&#10;position           7&#10;nesting_depth      0&#10;parent_item_id     null&#10;verbatim           &quot;1101 ( ii )&quot;&#10;name_as_declared   null&#10;declared_role      &quot;FLOUR TREATMENT AGENT&quot;&#10;role_source        &quot;group_heading&quot;&#10;declared_code      &quot;1101 ( ii )&quot;&#10;code_system        &quot;bare&quot;&#10;percentage         null&#10;emphasis           false&#10;footnote_marker    null&#10;confidence         1.0&#10;&#10;NO is_additive. NO canonical id.&#10;Observations only." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8DAEF;strokeColor=#7D3C98;align=left;fontSize=10;fontFamily=Courier New;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="330" height="290" as="geometry" />
+        </mxCell>
+
+        <mxCell id="d2" value="ResolvedItem  —  what it IS&#10;&#10;item_id                 10   ← the only link back&#10;canonical_ins           &quot;1101(ii)&quot;&#10;eu_canonical_id         null&#10;classification          &quot;enzyme&quot;&#10;normalised_role         &quot;Flour treatment agent&quot;&#10;codex_functional_classes [&quot;Flavour enhancer&quot;]&#10;resolution_method       &quot;code_exact&quot;&#10;resolution_confidence   0.98&#10;flags                   [&quot;role_class_mismatch&quot;]&#10;candidates              []&#10;matched_on              &quot;1101(ii)&quot;&#10;&#10;Reads only 5 of the 14 fields above:&#10;item_id, declared_code, name_as_declared,&#10;declared_role, verbatim" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;align=left;fontSize=10;fontFamily=Courier New;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="100" width="360" height="290" as="geometry" />
+        </mxCell>
+
+        <mxCell id="d3" value="ItemVerdict  —  what the LAW says&#10;&#10;item_id            10&#10;eu_canonical_id    null&#10;additive_name      &quot;Papain&quot;&#10;component_label    null&#10;headline           &quot;out_of_scope&quot;&#10;verdict_certainty  &quot;certain&quot;&#10;category_sensitive false&#10;by_category        []&#10;flags              [&quot;enzyme_reg_1332_2008&quot;]&#10;&#10;by_category holds ONE CategoryVerdict&#10;per candidate category:&#10;  fcs_code, rank, verdict, max_level,&#10;  conditions, source_url, retrieved_date" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D1F2EB;strokeColor=#148F77;align=left;fontSize=10;fontFamily=Courier New;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="790" y="100" width="360" height="290" as="geometry" />
+        </mxCell>
+
+        <mxCell id="de1" value="item_id" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="d1" target="d2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="de2" value="item_id" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="d2" target="d3"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="funnel" value="THE FUNNEL NARROWS&#10;&#10;14 fields written by extraction&#10;→ 5 read by the resolver&#10;→ 3 read by the category stage&#10;&#10;Each stage consumes less than the last.&#10;That is why the boundaries hold." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDFEFE;strokeColor=#999999;align=left;fontSize=11;spacingLeft=10;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="430" width="330" height="140" as="geometry" />
+        </mxCell>
+
+        <mxCell id="worked" value="WORKED EXAMPLE — Parle-G, INS 1101(ii)&#10;&#10;label prints        &quot;FLOUR TREATMENT AGENT [1101 ( ii )]&quot;&#10;extraction records  declared_code &quot;1101 ( ii )&quot;, code_system &quot;bare&quot;&#10;resolver normalises &quot;1101(ii)&quot;, finds it in codex_ins as PAPAIN&#10;                    Codex says Flavour enhancer — the label says&#10;                    Flour treatment agent → flag role_class_mismatch&#10;                    absent from eu_fip → classification &quot;enzyme&quot;&#10;rule engine         out_of_scope — Reg 1332/2008 governs enzymes,&#10;                    NOT Annex II&#10;&#10;A naive closed-list check would have said &quot;not in the Union list,&#10;therefore not permitted&quot; and produced a FALSE export failure on a&#10;perfectly legal product." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;align=left;fontSize=10;fontFamily=Courier New;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="430" width="750" height="230" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

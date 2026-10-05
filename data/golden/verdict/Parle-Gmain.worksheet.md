@@ -1,0 +1,388 @@
+# Verdict golden worksheet -- Parle-Gmain
+
+Pinned categories (PROVISIONAL -- rank-1 retrieved, review before trusting):
+  - INVERT SUGAR SYRUP: '11.2' (Other sugars and syrups)
+  - (product): '15' (Ready -to-eat savouries and snacks)
+
+## item_id=0
+- verbatim: 'REFINED WHEAT FLOUR (MAIDA ) (68%)'
+- classification: food_ingredient
+- resolved eu_canonical_id: None  canonical_ins: None
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- OUT OF SCOPE -- not an additive. Not an Annex II lookup.
+
+## item_id=1
+- verbatim: 'SUGAR'
+- classification: food_ingredient
+- resolved eu_canonical_id: None  canonical_ins: None
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- OUT OF SCOPE -- not an additive. Not an Annex II lookup.
+
+## item_id=2
+- verbatim: 'REFINED PALM OIL'
+- classification: food_ingredient
+- resolved eu_canonical_id: None  canonical_ins: None
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- OUT OF SCOPE -- not an additive. Not an Annex II lookup.
+
+## item_id=3
+- verbatim: 'INVERT SUGAR SYRUP# [SUGAR, CITRIC ACID]'
+- classification: compound
+- resolved eu_canonical_id: None  canonical_ins: None
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- OUT OF SCOPE -- not an additive (a container/group node, not a substance). Not an Annex II lookup.
+
+## item_id=4
+- verbatim: 'SUGAR'
+- classification: food_ingredient
+- resolved eu_canonical_id: None  canonical_ins: None
+- component: 'INVERT SUGAR SYRUP'  pinned category: 'INVERT SUGAR SYRUP' -> {'code': '11.2', 'name': 'Other sugars and syrups'}
+- OUT OF SCOPE -- not an additive. Not an Annex II lookup.
+
+## item_id=5
+- verbatim: 'CITRIC ACID'
+- classification: additive
+- resolved eu_canonical_id: '330'  canonical_ins: '330'
+- component: 'INVERT SUGAR SYRUP'  pinned category: 'INVERT SUGAR SYRUP' -> {'code': '11.2', 'name': 'Other sugars and syrups'}
+- eu_fip evidence:
+  Exact match: eu_fip rows for ('330', '11.2'):
+    - status=permitted, level=no numeric cap
+      conditions: Permitted via Group I, Additives; ML = quantum satis; except E 425 ML = 10000 mg/kg; E 620 to E 625, ML = 10000 mg/kg individually or in combination, expressed as glutamic acid; E 626 to E 635, ML = 500 mg/kg individually or in combination, expressed as guanylic acid.
+
+## item_id=6
+- verbatim: 'IODISED SALT'
+- classification: food_ingredient
+- resolved eu_canonical_id: None  canonical_ins: None
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- OUT OF SCOPE -- not an additive. Not an Annex II lookup.
+
+## item_id=7
+- verbatim: '503 ( ii )'
+- classification: additive
+- resolved eu_canonical_id: '503'  canonical_ins: '503(ii)'
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- eu_fip evidence:
+  No row (exact or parent-widened) at pinned category '15'. '503' DOES appear elsewhere in eu_fip -- likely not_permitted_in_category, not not_authorised_eu. All rows found, any category:
+    - 503 in 13.1.3: status=permitted
+    - 503 in 1.9: status=permitted
+    - 503 in 1.10: status=permitted
+    - 503 in 1.4: status=permitted
+    - 503 in 1.6.3: status=permitted
+    - 503 in 1.7.5: status=permitted
+    - 503 in 1.7.6: status=permitted
+    - 503 in 2.3: status=permitted
+    - 503 in 2.2.2: status=permitted
+    - 503 in 3: status=permitted
+    - 503 in 4.2.4.1: status=permitted
+    - 503 in 4.2.5.4: status=permitted
+    - 503 in 4.2.6: status=permitted
+    - 503 in 6.3: status=permitted
+    - 503 in 6.4.5: status=permitted
+    - 503 in 6.5: status=permitted
+    - 503 in 6.6: status=permitted
+    - 503 in 6.7: status=permitted
+    - 503 in 7.2: status=permitted
+    - 503 in 8.3.1: status=permitted
+    - 503 in 8.3.3: status=permitted
+    - 503 in 9.2: status=permitted
+    - 503 in 10.2: status=permitted
+    - 503 in 11.2: status=permitted
+    - 503 in 12.1.2: status=permitted
+    - 503 in 12.2.2: status=permitted
+    - 503 in 12.3: status=permitted
+    - 503 in 12.4: status=permitted
+    - 503 in 12.5: status=permitted
+    - 503 in 12.6: status=permitted
+    - 503 in 12.7: status=permitted
+    - 503 in 12.8: status=permitted
+    - 503 in 12.9: status=permitted
+    - 503 in 15.1: status=permitted
+    - 503 in 15.2: status=permitted
+    - 503 in 16: status=permitted
+    - 503 in 18: status=permitted
+    - 503 in 1.7.1: status=permitted
+    - 503 in 1.7.1: status=permitted
+    - 503 in 5.1: status=permitted
+    - 503 in 5.1: status=permitted
+    - 503 in 7.1: status=permitted
+    - 503 in 7.1: status=permitted
+    - 503 in 8.3.2: status=permitted
+    - 503 in 8.3.2: status=permitted
+    - 503 in 9.3: status=permitted
+    - 503 in 9.3: status=permitted
+    - 503 in 14.2.3: status=permitted
+    - 503 in 14.2.3: status=permitted
+    - 503 in 14.2.4: status=permitted
+    - 503 in 14.2.4: status=permitted
+    - 503 in 14.2.5: status=permitted
+    - 503 in 14.2.5: status=permitted
+    - 503 in 14.2.7.1: status=permitted
+    - 503 in 14.2.7.1: status=permitted
+    - 503 in 14.2.7.2: status=permitted
+    - 503 in 14.2.7.2: status=permitted
+    - 503 in 14.2.7.3: status=permitted
+    - 503 in 14.2.7.3: status=permitted
+    - 503 in 14.1.5.2: status=permitted
+    - 503 in 14.1.5.2: status=permitted
+    - 503 in 6.4.2: status=permitted
+    - 503 in 6.4.2: status=permitted
+    - 503 in 4.2.1: status=permitted
+    - 503 in 4.2.1: status=permitted
+    - 503 in 5.2: status=permitted
+    - 503 in 5.2: status=permitted
+    - 503 in 6.4.4: status=permitted
+    - 503 in 6.4.4: status=permitted
+    - 503 in 14.2.6: status=permitted
+    - 503 in 14.2.6: status=permitted
+    - 503 in 14.2.8: status=permitted
+    - 503 in 14.2.8: status=permitted
+    - 503 in 17.2: status=permitted
+    - 503 in 17.1: status=permitted
+    - 503 in 17.1: status=permitted
+    - 503 in 14.1.4: status=permitted
+    - 503 in 14.1.4: status=permitted
+    - 503 in 1.3: status=permitted
+    - 503 in 18.2: status=permitted
+    - 503 in 18.3: status=permitted
+    - 503 in 18.3: status=permitted
+    - 503 in 14.1.2: status=permitted
+    - 503 in 14.1.2: status=permitted
+    - 503 in 14.1.3: status=permitted
+    - 503 in 14.1.3: status=permitted
+    - 503 in 18.1: status=permitted
+    - 503 in 1.8: status=permitted
+    - 503 in 4.2.2: status=permitted
+    - 503 in 5.3: status=permitted
+    - 503 in 5.4: status=permitted
+    - 503 in 6.2.2: status=permitted
+    - 503 in 13.2: status=permitted
+    - 503 in 13.3: status=permitted
+    - 503 in 5.1: status=permitted
+
+## item_id=8
+- verbatim: '500 (ii)'
+- classification: additive
+- resolved eu_canonical_id: '500(ii)'  canonical_ins: '500(ii)'
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- eu_fip evidence:
+  No row (exact or parent-widened) at pinned category '15'. '500(ii)' DOES appear elsewhere in eu_fip -- likely not_permitted_in_category, not not_authorised_eu. All rows found, any category:
+    - 500(ii) in 1.5: status=permitted
+    - 500(ii) in 1.7.2: status=permitted
+    - 500 in 11.4.1: status=permitted
+    - 500 in 11.4.2: status=permitted
+    - 500 in 11.4.3: status=permitted
+    - 500 in 12.1.1: status=permitted
+    - 500 in 13.1.3: status=permitted
+    - 500 in 13.1.5: status=permitted
+    - 500 in 8.2: status=permitted
+    - 500 in 9.1.2: status=permitted
+    - 500 in 2.2.1: status=permitted
+    - 500 in 1.9: status=permitted
+    - 500 in 1.10: status=permitted
+    - 500 in 13.1.5.1: status=permitted
+    - 500 in 1.4: status=permitted
+    - 500 in 1.6.3: status=permitted
+    - 500 in 1.7.5: status=permitted
+    - 500 in 1.7.6: status=permitted
+    - 500 in 2.3: status=permitted
+    - 500 in 2.2.2: status=permitted
+    - 500 in 3: status=permitted
+    - 500 in 4.2.4.1: status=permitted
+    - 500 in 4.2.5.4: status=permitted
+    - 500 in 4.2.6: status=permitted
+    - 500 in 6.3: status=permitted
+    - 500 in 6.4.5: status=permitted
+    - 500 in 6.5: status=permitted
+    - 500 in 6.6: status=permitted
+    - 500 in 6.7: status=permitted
+    - 500 in 7.2: status=permitted
+    - 500 in 8.3.1: status=permitted
+    - 500 in 8.3.3: status=permitted
+    - 500 in 9.2: status=permitted
+    - 500 in 10.2: status=permitted
+    - 500 in 11.2: status=permitted
+    - 500 in 12.1.2: status=permitted
+    - 500 in 12.2.2: status=permitted
+    - 500 in 12.3: status=permitted
+    - 500 in 12.4: status=permitted
+    - 500 in 12.5: status=permitted
+    - 500 in 12.6: status=permitted
+    - 500 in 12.7: status=permitted
+    - 500 in 12.8: status=permitted
+    - 500 in 12.9: status=permitted
+    - 500 in 15.1: status=permitted
+    - 500 in 15.2: status=permitted
+    - 500 in 16: status=permitted
+    - 500 in 18: status=permitted
+    - 500 in 1.7.1: status=permitted
+    - 500 in 1.7.1: status=permitted
+    - 500 in 5.1: status=permitted
+    - 500 in 5.1: status=permitted
+    - 500 in 7.1: status=permitted
+    - 500 in 7.1: status=permitted
+    - 500 in 8.3.2: status=permitted
+    - 500 in 8.3.2: status=permitted
+    - 500 in 9.3: status=permitted
+    - 500 in 9.3: status=permitted
+    - 500 in 14.2.3: status=permitted
+    - 500 in 14.2.3: status=permitted
+    - 500 in 14.2.4: status=permitted
+    - 500 in 14.2.4: status=permitted
+    - 500 in 14.2.5: status=permitted
+    - 500 in 14.2.5: status=permitted
+    - 500 in 14.2.7.1: status=permitted
+    - 500 in 14.2.7.1: status=permitted
+    - 500 in 14.2.7.2: status=permitted
+    - 500 in 14.2.7.2: status=permitted
+    - 500 in 14.2.7.3: status=permitted
+    - 500 in 14.2.7.3: status=permitted
+    - 500 in 14.1.5.2: status=permitted
+    - 500 in 14.1.5.2: status=permitted
+    - 500 in 6.4.2: status=permitted
+    - 500 in 6.4.2: status=permitted
+    - 500 in 4.2.1: status=permitted
+    - 500 in 4.2.1: status=permitted
+    - 500 in 5.2: status=permitted
+    - 500 in 5.2: status=permitted
+    - 500 in 6.4.4: status=permitted
+    - 500 in 6.4.4: status=permitted
+    - 500 in 14.2.6: status=permitted
+    - 500 in 14.2.6: status=permitted
+    - 500 in 14.2.8: status=permitted
+    - 500 in 14.2.8: status=permitted
+    - 500 in 17.2: status=permitted
+    - 500 in 17.1: status=permitted
+    - 500 in 17.1: status=permitted
+    - 500 in 14.1.4: status=permitted
+    - 500 in 14.1.4: status=permitted
+    - 500 in 1.3: status=permitted
+    - 500 in 18.2: status=permitted
+    - 500 in 18.3: status=permitted
+    - 500 in 18.3: status=permitted
+    - 500 in 14.1.2: status=permitted
+    - 500 in 14.1.2: status=permitted
+    - 500 in 14.1.3: status=permitted
+    - 500 in 14.1.3: status=permitted
+    - 500 in 18.1: status=permitted
+    - 500 in 1.8: status=permitted
+    - 500 in 4.2.2: status=permitted
+    - 500 in 5.3: status=permitted
+    - 500 in 5.4: status=permitted
+    - 500 in 6.2.2: status=permitted
+    - 500 in 13.2: status=permitted
+    - 500 in 13.3: status=permitted
+    - 500 in 5.1: status=permitted
+
+## item_id=9
+- verbatim: 'MILK SOLIDS'
+- classification: food_ingredient
+- resolved eu_canonical_id: None  canonical_ins: None
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- OUT OF SCOPE -- not an additive. Not an Annex II lookup.
+
+## item_id=10
+- verbatim: '1101 ( ii )'
+- classification: enzyme
+- resolved eu_canonical_id: None  canonical_ins: '1101(ii)'
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- OUT OF SCOPE -- Reg 1332/2008. Not an Annex II lookup.
+
+## item_id=11
+- verbatim: '472e'
+- classification: additive
+- resolved eu_canonical_id: '472e'  canonical_ins: '472e'
+- component: None  pinned category: '(product)' -> {'code': '15', 'name': 'Ready -to-eat savouries and snacks'}
+- eu_fip evidence:
+  No row (exact or parent-widened) at pinned category '15'. '472e' DOES appear elsewhere in eu_fip -- likely not_permitted_in_category, not not_authorised_eu. All rows found, any category:
+    - 472e in 7.1.1: status=permitted
+    - 472e in 1.4: status=permitted
+    - 472e in 1.6.3: status=permitted
+    - 472e in 1.7.5: status=permitted
+    - 472e in 1.7.6: status=permitted
+    - 472e in 2.3: status=permitted
+    - 472e in 2.2.2: status=permitted
+    - 472e in 3: status=permitted
+    - 472e in 4.2.4.1: status=permitted
+    - 472e in 4.2.5.4: status=permitted
+    - 472e in 4.2.6: status=permitted
+    - 472e in 6.3: status=permitted
+    - 472e in 6.4.5: status=permitted
+    - 472e in 6.5: status=permitted
+    - 472e in 6.6: status=permitted
+    - 472e in 6.7: status=permitted
+    - 472e in 7.2: status=permitted
+    - 472e in 8.3.1: status=permitted
+    - 472e in 8.3.3: status=permitted
+    - 472e in 9.2: status=permitted
+    - 472e in 10.2: status=permitted
+    - 472e in 11.2: status=permitted
+    - 472e in 12.1.2: status=permitted
+    - 472e in 12.2.2: status=permitted
+    - 472e in 12.3: status=permitted
+    - 472e in 12.4: status=permitted
+    - 472e in 12.5: status=permitted
+    - 472e in 12.6: status=permitted
+    - 472e in 12.7: status=permitted
+    - 472e in 12.8: status=permitted
+    - 472e in 12.9: status=permitted
+    - 472e in 15.1: status=permitted
+    - 472e in 15.2: status=permitted
+    - 472e in 16: status=permitted
+    - 472e in 18: status=permitted
+    - 472e in 1.7.1: status=permitted
+    - 472e in 1.7.1: status=permitted
+    - 472e in 5.1: status=permitted
+    - 472e in 5.1: status=permitted
+    - 472e in 7.1: status=permitted
+    - 472e in 7.1: status=permitted
+    - 472e in 8.3.2: status=permitted
+    - 472e in 8.3.2: status=permitted
+    - 472e in 9.3: status=permitted
+    - 472e in 9.3: status=permitted
+    - 472e in 14.2.3: status=permitted
+    - 472e in 14.2.3: status=permitted
+    - 472e in 14.2.4: status=permitted
+    - 472e in 14.2.4: status=permitted
+    - 472e in 14.2.5: status=permitted
+    - 472e in 14.2.5: status=permitted
+    - 472e in 14.2.7.1: status=permitted
+    - 472e in 14.2.7.1: status=permitted
+    - 472e in 14.2.7.2: status=permitted
+    - 472e in 14.2.7.2: status=permitted
+    - 472e in 14.2.7.3: status=permitted
+    - 472e in 14.2.7.3: status=permitted
+    - 472e in 14.1.5.2: status=permitted
+    - 472e in 14.1.5.2: status=permitted
+    - 472e in 6.4.2: status=permitted
+    - 472e in 6.4.2: status=permitted
+    - 472e in 4.2.1: status=permitted
+    - 472e in 4.2.1: status=permitted
+    - 472e in 5.2: status=permitted
+    - 472e in 5.2: status=permitted
+    - 472e in 6.4.4: status=permitted
+    - 472e in 6.4.4: status=permitted
+    - 472e in 14.2.6: status=permitted
+    - 472e in 14.2.6: status=permitted
+    - 472e in 14.2.8: status=permitted
+    - 472e in 14.2.8: status=permitted
+    - 472e in 17.2: status=permitted
+    - 472e in 17.1: status=permitted
+    - 472e in 17.1: status=permitted
+    - 472e in 14.1.4: status=permitted
+    - 472e in 14.1.4: status=permitted
+    - 472e in 1.3: status=permitted
+    - 472e in 18.2: status=permitted
+    - 472e in 18.3: status=permitted
+    - 472e in 18.3: status=permitted
+    - 472e in 14.1.2: status=permitted
+    - 472e in 14.1.2: status=permitted
+    - 472e in 14.1.3: status=permitted
+    - 472e in 14.1.3: status=permitted
+    - 472e in 18.1: status=permitted
+    - 472e in 1.8: status=permitted
+    - 472e in 4.2.2: status=permitted
+    - 472e in 5.3: status=permitted
+    - 472e in 5.4: status=permitted
+    - 472e in 6.2.2: status=permitted
+    - 472e in 13.2: status=permitted
+    - 472e in 13.3: status=permitted

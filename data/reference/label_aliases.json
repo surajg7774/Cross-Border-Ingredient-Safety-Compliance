@@ -1,0 +1,714 @@
+{
+  "_meta": {
+    "purpose": "Common label names that do not appear in CXG 36-1989 as INS names or parenthetical synonyms. The standard states 'Not all synonyms are listed', so this file fills that gap.",
+    "authority": "SUPPLEMENTARY ONLY. codex_ins.json (from CXG 36-1989) is authoritative. This file is hand-maintained and must be reviewed before use in any verdict.",
+    "how_to_use": "Resolver cascade tier 3 (synonym). Try codex_ins.json exact and parenthetical synonyms FIRST. Only fall through to this file if those miss.",
+    "ins_name_field": "The exact name as printed in CXG 36-1989. Always verify the alias resolves to this before trusting it.",
+    "confidence": "high = unambiguous chemical identity. medium = correct but check context. Anything less went into ambiguous[] instead.",
+    "version": "2026-08-01",
+    "review_status": "VERIFIED against codex_ins.json 2026-07-31",
+    "verified_note": "66 aliases, 0 NOT FOUND, 8 ins_name corrections applied automatically.",
+    "changelog_2026-08-01": "Added \"invert sugar syrup\", \"invert sugar\" and \"caffeine\" to never_additives.terms -- all three were falling to classification=unknown; none is an Annex II additive (caffeine is regulated as an ingredient with a labelling requirement, not an additive)."
+  },
+  "aliases": [
+    {
+      "alias": "acetic acid",
+      "ins": "260",
+      "ins_name": "Acetic acid, glacial",
+      "confidence": "high",
+      "note": "INS name adds 'glacial'"
+    },
+    {
+      "alias": "malic acid",
+      "ins": "296",
+      "ins_name": "Malic acid, DL-",
+      "confidence": "high",
+      "note": "INS name adds isomer"
+    },
+    {
+      "alias": "lactic acid",
+      "ins": "270",
+      "ins_name": "Lactic acid, L-, D- and DL-",
+      "confidence": "high",
+      "note": "INS name lists isomers"
+    },
+    {
+      "alias": "ascorbic acid",
+      "ins": "300",
+      "ins_name": "Ascorbic acid, L-",
+      "confidence": "high",
+      "note": "INS name adds isomer"
+    },
+    {
+      "alias": "vitamin c",
+      "ins": "300",
+      "ins_name": "Ascorbic acid, L-",
+      "confidence": "medium",
+      "note": "Only when declared as an additive. As a nutrient it is out of Annex II scope."
+    },
+    {
+      "alias": "tartaric acid",
+      "ins": "334",
+      "ins_name": "Tartaric acid, L(+)-",
+      "confidence": "high",
+      "note": "INS name adds isomer"
+    },
+    {
+      "alias": "glutamic acid",
+      "ins": "620",
+      "ins_name": "Glutamic acid, L(+)-",
+      "confidence": "high",
+      "note": "INS name adds isomer"
+    },
+    {
+      "alias": "sodium bicarbonate",
+      "ins": "500(ii)",
+      "ins_name": "Sodium hydrogen carbonate",
+      "confidence": "high",
+      "note": "No shared term with INS name. Pure synonym lookup."
+    },
+    {
+      "alias": "baking soda",
+      "ins": "500(ii)",
+      "ins_name": "Sodium hydrogen carbonate",
+      "confidence": "high",
+      "note": "Common name"
+    },
+    {
+      "alias": "potassium bicarbonate",
+      "ins": "501(ii)",
+      "ins_name": "Potassium hydrogen carbonate",
+      "confidence": "high",
+      "note": "bicarbonate = hydrogen carbonate"
+    },
+    {
+      "alias": "ammonium bicarbonate",
+      "ins": "503(ii)",
+      "ins_name": "Ammonium hydrogen carbonate",
+      "confidence": "high",
+      "note": "bicarbonate = hydrogen carbonate"
+    },
+    {
+      "alias": "calcium bicarbonate",
+      "ins": "170(ii)",
+      "ins_name": "Calcium hydrogen carbonate",
+      "confidence": "high",
+      "note": "bicarbonate = hydrogen carbonate"
+    },
+    {
+      "alias": "sodium bisulphite",
+      "ins": "222",
+      "ins_name": "Sodium hydrogen sulphite",
+      "confidence": "high",
+      "note": "bisulphite = hydrogen sulphite"
+    },
+    {
+      "alias": "sodium bisulfite",
+      "ins": "222",
+      "ins_name": "Sodium hydrogen sulphite",
+      "confidence": "high",
+      "note": "US spelling"
+    },
+    {
+      "alias": "soy lecithin",
+      "ins": "322(i)",
+      "ins_name": "Lecithin",
+      "confidence": "high",
+      "note": "Source qualifier is not in the INS name"
+    },
+    {
+      "alias": "soya lecithin",
+      "ins": "322(i)",
+      "ins_name": "Lecithin",
+      "confidence": "high",
+      "note": "UK/India spelling"
+    },
+    {
+      "alias": "soybean lecithin",
+      "ins": "322(i)",
+      "ins_name": "Lecithin",
+      "confidence": "high",
+      "note": "Source qualifier"
+    },
+    {
+      "alias": "sunflower lecithin",
+      "ins": "322(i)",
+      "ins_name": "Lecithin",
+      "confidence": "high",
+      "note": "Source qualifier"
+    },
+    {
+      "alias": "lecithin",
+      "ins": "322(i)",
+      "ins_name": "Lecithin",
+      "confidence": "high",
+      "note": "322 is the family; 322(i) is plain lecithin"
+    },
+    {
+      "alias": "msg",
+      "ins": "621",
+      "ins_name": "Monosodium L-glutamate",
+      "confidence": "high",
+      "note": "Very common abbreviation"
+    },
+    {
+      "alias": "monosodium glutamate",
+      "ins": "621",
+      "ins_name": "Monosodium L-glutamate",
+      "confidence": "high",
+      "note": "INS name adds L-"
+    },
+    {
+      "alias": "ajinomoto",
+      "ins": "621",
+      "ins_name": "Monosodium L-glutamate",
+      "confidence": "medium",
+      "note": "Trade name, widely used on Indian labels"
+    },
+    {
+      "alias": "disodium guanylate",
+      "ins": "627",
+      "ins_name": "Disodium 5’-guanylate",
+      "confidence": "high",
+      "note": "INS name adds 5'-"
+    },
+    {
+      "alias": "disodium inosinate",
+      "ins": "631",
+      "ins_name": "Disodium 5’-inosinate",
+      "confidence": "high",
+      "note": "INS name adds 5'-"
+    },
+    {
+      "alias": "disodium ribonucleotides",
+      "ins": "635",
+      "ins_name": "Disodium 5’-ribonucleotides",
+      "confidence": "high",
+      "note": "INS name adds 5'-"
+    },
+    {
+      "alias": "steviol glycosides",
+      "ins": "960a",
+      "ins_name": "Steviol glycosides from Stevia rebaudiana Bertoni",
+      "confidence": "medium",
+      "note": "960a is the plant-derived form. 960b/c/d are fermentation, enzymatic and glucosylated. Prefer 960a only when source is unstated."
+    },
+    {
+      "alias": "acesulfame k",
+      "ins": "950",
+      "ins_name": "Acesulfame potassium",
+      "confidence": "high",
+      "note": "K = potassium"
+    },
+    {
+      "alias": "acesulfame potassium",
+      "ins": "950",
+      "ins_name": "Acesulfame potassium",
+      "confidence": "high",
+      "note": "Exact"
+    },
+    {
+      "alias": "saccharin",
+      "ins": "954(i)",
+      "ins_name": "Saccharin",
+      "confidence": "medium",
+      "note": "954 is the family; salts are 954(ii)-(iv). Plain 'saccharin' means the acid form."
+    },
+    {
+      "alias": "locust bean gum",
+      "ins": "410",
+      "ins_name": "Carob bean gum",
+      "confidence": "high",
+      "note": "Same substance, different common name. INS uses 'carob'."
+    },
+    {
+      "alias": "gum acacia",
+      "ins": "414",
+      "ins_name": "Gum arabic",
+      "confidence": "high",
+      "note": "Word order variant"
+    },
+    {
+      "alias": "agar agar",
+      "ins": "406",
+      "ins_name": "Agar",
+      "confidence": "high",
+      "note": "Doubled form common in India"
+    },
+    {
+      "alias": "gelatine",
+      "ins": "428",
+      "ins_name": "Gelatin",
+      "confidence": "high",
+      "note": "UK spelling"
+    },
+    {
+      "alias": "pectin",
+      "ins": "440",
+      "ins_name": "Pectins",
+      "confidence": "high",
+      "note": "Singular vs plural"
+    },
+    {
+      "alias": "carrageenan",
+      "ins": "407",
+      "ins_name": "Carrageenan",
+      "confidence": "high",
+      "note": "Exact"
+    },
+    {
+      "alias": "glycerine",
+      "ins": "422",
+      "ins_name": "Glycerol",
+      "confidence": "high",
+      "note": "Common name"
+    },
+    {
+      "alias": "glycerin",
+      "ins": "422",
+      "ins_name": "Glycerol",
+      "confidence": "high",
+      "note": "US spelling"
+    },
+    {
+      "alias": "mono and diglycerides",
+      "ins": "471",
+      "ins_name": "Mono- and di-glycerides of fatty acids",
+      "confidence": "high",
+      "note": "Hyphenation variant"
+    },
+    {
+      "alias": "monoglycerides",
+      "ins": "471",
+      "ins_name": "Mono- and di-glycerides of fatty acids",
+      "confidence": "medium",
+      "note": "Partial name; 471 covers both"
+    },
+    {
+      "alias": "gms",
+      "ins": "471",
+      "ins_name": "Mono- and di-glycerides of fatty acids",
+      "confidence": "medium",
+      "note": "Glyceryl monostearate, a specific 471"
+    },
+    {
+      "alias": "datem",
+      "ins": "472e",
+      "ins_name": "Diacetyltartaric and fatty acid esters of glycerol",
+      "confidence": "high",
+      "note": "Industry abbreviation"
+    },
+    {
+      "alias": "ssl",
+      "ins": "481(i)",
+      "ins_name": "Sodium stearoyl lactylate",
+      "confidence": "high",
+      "note": "Industry abbreviation"
+    },
+    {
+      "alias": "sodium stearoyl lactylate",
+      "ins": "481(i)",
+      "ins_name": "Sodium stearoyl lactylate",
+      "confidence": "high",
+      "note": "Exact"
+    },
+    {
+      "alias": "polysorbate 20",
+      "ins": "432",
+      "ins_name": "Polyoxyethylene (20) sorbitan monolaurate",
+      "confidence": "high",
+      "note": "Trade naming convention"
+    },
+    {
+      "alias": "polysorbate 60",
+      "ins": "435",
+      "ins_name": "Polyoxyethylene (20) sorbitan monostearate",
+      "confidence": "high",
+      "note": "Trade naming convention"
+    },
+    {
+      "alias": "polysorbate 80",
+      "ins": "433",
+      "ins_name": "Polyoxyethylene (20) sorbitan monooleate",
+      "confidence": "high",
+      "note": "Trade naming convention"
+    },
+    {
+      "alias": "bha",
+      "ins": "320",
+      "ins_name": "Butylated hydroxyanisole",
+      "confidence": "high",
+      "note": "Standard abbreviation"
+    },
+    {
+      "alias": "bht",
+      "ins": "321",
+      "ins_name": "Butylated hydroxytoluene",
+      "confidence": "high",
+      "note": "Standard abbreviation"
+    },
+    {
+      "alias": "tbhq",
+      "ins": "319",
+      "ins_name": "Tertiary butylhydroquinone",
+      "confidence": "high",
+      "note": "Standard abbreviation"
+    },
+    {
+      "alias": "edta",
+      "ins": "386",
+      "ins_name": "Disodium ethylenediaminetetraacetate",
+      "confidence": "medium",
+      "note": "385 is the calcium disodium salt. Check which is meant."
+    },
+    {
+      "alias": "silicon dioxide",
+      "ins": "551",
+      "ins_name": "Silicon dioxide, amorphous",
+      "confidence": "high",
+      "note": "INS name adds 'amorphous'"
+    },
+    {
+      "alias": "silica",
+      "ins": "551",
+      "ins_name": "Silicon dioxide, amorphous",
+      "confidence": "high",
+      "note": "Common name"
+    },
+    {
+      "alias": "tricalcium phosphate",
+      "ins": "341(iii)",
+      "ins_name": "Tricalcium phosphate",
+      "confidence": "high",
+      "note": "Exact, and unambiguous unlike bare 'calcium phosphate'"
+    },
+    {
+      "alias": "sodium tripolyphosphate",
+      "ins": "451(i)",
+      "ins_name": "Pentasodium triphosphate",
+      "confidence": "high",
+      "note": "Tripolyphosphate = triphosphate"
+    },
+    {
+      "alias": "stpp",
+      "ins": "451(i)",
+      "ins_name": "Pentasodium triphosphate",
+      "confidence": "high",
+      "note": "Industry abbreviation"
+    },
+    {
+      "alias": "microcrystalline cellulose",
+      "ins": "460(i)",
+      "ins_name": "Microcrystalline cellulose",
+      "confidence": "high",
+      "note": "Exact"
+    },
+    {
+      "alias": "mcc",
+      "ins": "460(i)",
+      "ins_name": "Microcrystalline cellulose",
+      "confidence": "medium",
+      "note": "Abbreviation"
+    },
+    {
+      "alias": "cmc",
+      "ins": "466",
+      "ins_name": "Sodium carboxymethyl cellulose",
+      "confidence": "high",
+      "note": "Standard abbreviation"
+    },
+    {
+      "alias": "carboxymethyl cellulose",
+      "ins": "466",
+      "ins_name": "Sodium carboxymethyl cellulose",
+      "confidence": "medium",
+      "note": "466 is the sodium salt; plain CMC usually means this"
+    },
+    {
+      "alias": "papain",
+      "ins": "1101(ii)",
+      "ins_name": "Papain",
+      "confidence": "high",
+      "note": "Enzyme. Reg 1332/2008 in the EU, NOT Annex II - resolver must mark out_of_scope."
+    },
+    {
+      "alias": "bromelain",
+      "ins": "1101(iii)",
+      "ins_name": "Bromelain",
+      "confidence": "high",
+      "note": "Enzyme. Same EU scope caveat."
+    },
+    {
+      "alias": "carmine",
+      "ins": "120",
+      "ins_name": "Carmines",
+      "confidence": "high",
+      "note": "Singular vs plural"
+    },
+    {
+      "alias": "cochineal",
+      "ins": "120",
+      "ins_name": "Carmines",
+      "confidence": "medium",
+      "note": "Source organism name used as colour name"
+    },
+    {
+      "alias": "beta carotene",
+      "ins": "160a",
+      "ins_name": "Carotenes",
+      "confidence": "medium",
+      "note": "160a is the family; sub-types differ by source. Route to review if source matters."
+    },
+    {
+      "alias": "annatto",
+      "ins": "160b",
+      "ins_name": "Annatto extracts",
+      "confidence": "medium",
+      "note": "160b(i) bixin vs 160b(ii) norbixin. PROHIBITED in the EU - check eu_fip.json."
+    },
+    {
+      "alias": "titanium dioxide",
+      "ins": "171",
+      "ins_name": "Titanium dioxide",
+      "confidence": "high",
+      "note": "PROHIBITED in the EU since 2022. Exact match, flagged for salience."
+    }
+  ],
+  "ambiguous": [
+    {
+      "alias": "modified starch",
+      "candidates": [
+        "1400",
+        "1401",
+        "1402",
+        "1403",
+        "1404",
+        "1405",
+        "1410",
+        "1412",
+        "1413",
+        "1414",
+        "1420",
+        "1422",
+        "1440",
+        "1442",
+        "1450",
+        "1451",
+        "1452"
+      ],
+      "action": "manual_review",
+      "note": "17 candidates. The label does not say which. Never guess - a wrong starch is a wrong verdict."
+    },
+    {
+      "alias": "modified cornstarch",
+      "candidates": [
+        "1400",
+        "1401",
+        "1402",
+        "1403",
+        "1404",
+        "1405",
+        "1410",
+        "1412",
+        "1413",
+        "1414",
+        "1420",
+        "1422",
+        "1440",
+        "1442",
+        "1450",
+        "1451",
+        "1452"
+      ],
+      "action": "manual_review",
+      "note": "Same as modified starch. Appears twice on EU_productmain."
+    },
+    {
+      "alias": "calcium phosphate",
+      "candidates": [
+        "341(i)",
+        "341(ii)",
+        "341(iii)"
+      ],
+      "action": "manual_review",
+      "note": "Mono-, di- and tricalcium. Different entries, different rules. Appears on EU_productmain."
+    },
+    {
+      "alias": "sodium phosphate",
+      "candidates": [
+        "339(i)",
+        "339(ii)",
+        "339(iii)"
+      ],
+      "action": "manual_review",
+      "note": "Mono-, di- and trisodium"
+    },
+    {
+      "alias": "potassium phosphate",
+      "candidates": [
+        "340(i)",
+        "340(ii)",
+        "340(iii)"
+      ],
+      "action": "manual_review",
+      "note": "Mono-, di- and tripotassium"
+    },
+    {
+      "alias": "caramel",
+      "candidates": [
+        "150a",
+        "150b",
+        "150c",
+        "150d"
+      ],
+      "action": "manual_review",
+      "note": "Four caramel classes by process. Plain/sulphite/ammonia/sulphite-ammonia."
+    },
+    {
+      "alias": "caramel colour",
+      "candidates": [
+        "150a",
+        "150b",
+        "150c",
+        "150d"
+      ],
+      "action": "manual_review",
+      "note": "Same as caramel"
+    },
+    {
+      "alias": "tocopherol",
+      "candidates": [
+        "307a",
+        "307b",
+        "307c",
+        "308",
+        "309"
+      ],
+      "action": "manual_review",
+      "note": "FAMILY GUARD case. Near-identical names, separate legal entries."
+    },
+    {
+      "alias": "stevia",
+      "candidates": [
+        "960a",
+        "960b",
+        "960c",
+        "960d"
+      ],
+      "action": "manual_review",
+      "note": "'Stevia' is a plant. The additive is steviol glycosides. Declaring 'Stevia' alone may itself be an EU labelling issue."
+    },
+    {
+      "alias": "turmeric",
+      "candidates": [
+        "100(ii)"
+      ],
+      "action": "manual_review",
+      "note": "TRAP. Turmeric is INS 100(ii) as a COLOUR, but is also a spice used as a food ingredient. The declared_role decides. Without a colour prefix, treat as food ingredient."
+    },
+    {
+      "alias": "paprika extract",
+      "candidates": [
+        "160c(i)",
+        "160c(ii)"
+      ],
+      "action": "manual_review",
+      "note": "Oleoresin vs extract"
+    },
+    {
+      "alias": "carotenes",
+      "candidates": [
+        "160a(i)",
+        "160a(ii)",
+        "160a(iii)",
+        "160a(iv)"
+      ],
+      "action": "manual_review",
+      "note": "Synthetic, vegetable, Blakeslea, Dunaliella"
+    }
+  ],
+  "never_additives": {
+    "_note": "Starter food-ingredient lexicon. Must sit ABOVE fuzzy matching in the resolver cascade, or 'turmeric' fuzzy-matches to E100 and 'salt' to something worse. Extend this from your own labels.",
+    "terms": [
+      "water",
+      "carbonated water",
+      "salt",
+      "iodised salt",
+      "iodized salt",
+      "sugar",
+      "invert sugar",
+      "brown sugar",
+      "jaggery",
+      "dextrose",
+      "glucose",
+      "glucose syrup",
+      "fructose",
+      "maltodextrin",
+      "corn maltodextrin",
+      "wheat flour",
+      "refined wheat flour",
+      "maida",
+      "atta",
+      "rice flour",
+      "corn flour",
+      "cornstarch",
+      "starch",
+      "potato",
+      "dehydrated potatoes",
+      "milk",
+      "milk solids",
+      "whey",
+      "whey protein concentrate",
+      "butter",
+      "cocoa butter",
+      "cocoa solids",
+      "cocoa mass",
+      "chocolate",
+      "palm oil",
+      "refined palm oil",
+      "palmolein",
+      "vegetable oil",
+      "edible vegetable oil",
+      "rice bran oil",
+      "sunflower oil",
+      "high oleic sunflower oil",
+      "coconut oil",
+      "refined coconut oil",
+      "groundnut oil",
+      "mustard oil",
+      "soybean oil",
+      "egg",
+      "dried egg white",
+      "gelatin free",
+      "honey",
+      "spices",
+      "condiments",
+      "chilli",
+      "turmeric powder",
+      "coriander powder",
+      "cumin powder",
+      "black pepper",
+      "cardamom",
+      "clove",
+      "nutmeg",
+      "onion powder",
+      "garlic powder",
+      "ginger powder",
+      "fenugreek",
+      "vinegar",
+      "vinegar solids",
+      "yeast",
+      "wheat gluten",
+      "hazelnut",
+      "peanut",
+      "cashew",
+      "almond",
+      "nuts",
+      "fructooligosaccharides",
+      "whey powder",
+      "invert sugar syrup",
+      "invert sugar",
+      "caffeine"
+    ]
+  }
+}

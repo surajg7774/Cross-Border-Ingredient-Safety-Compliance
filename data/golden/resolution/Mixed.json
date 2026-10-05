@@ -1,0 +1,71 @@
+{
+  "items": [
+    {
+      "item_id": 0,
+      "canonical_ins": "143",
+      "eu_canonical_id": null,
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Colour"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [
+        "not_in_eu_list"
+      ],
+      "candidates": [],
+      "matched_on": "143"
+    },
+    {
+      "item_id": 1,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 2,
+      "canonical_ins": "322(i)",
+      "eu_canonical_id": "322",
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Antioxidant",
+        "Emulsifier",
+        "Flour treatment agent"
+      ],
+      "resolution_method": "alias",
+      "resolution_confidence": 0.92,
+      "flags": [
+        "eu_widened_to_parent"
+      ],
+      "candidates": [],
+      "matched_on": "soy lecithin"
+    },
+    {
+      "item_id": 3,
+      "canonical_ins": "171",
+      "eu_canonical_id": "171",
+      "classification": "additive",
+      "normalised_role": null,
+      "codex_functional_classes": [
+        "Stabilizer",
+        "Colour"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "171"
+    }
+  ],
+  "warnings": [],
+  "index_version": "178af7a7517d"
+}

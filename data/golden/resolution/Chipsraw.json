@@ -1,0 +1,237 @@
+{
+  "items": [
+    {
+      "item_id": 0,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Potato"
+    },
+    {
+      "item_id": 1,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Edible Vegetable Oil"
+    },
+    {
+      "item_id": 2,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 3,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "compound",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "structural",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 4,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "unknown",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.0,
+      "flags": [],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 5,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Iodised Salt"
+    },
+    {
+      "item_id": 6,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Sugar"
+    },
+    {
+      "item_id": 7,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Maltodextrin"
+    },
+    {
+      "item_id": 8,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "flavouring",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "unresolved",
+      "resolution_confidence": 0.95,
+      "flags": [
+        "out_of_annex_ii_scope"
+      ],
+      "candidates": [],
+      "matched_on": null
+    },
+    {
+      "item_id": 9,
+      "canonical_ins": "470(i)",
+      "eu_canonical_id": "470a",
+      "classification": "additive",
+      "normalised_role": "Anticaking agent",
+      "codex_functional_classes": [
+        "Anticaking agent",
+        "Emulsifier",
+        "Stabilizer"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.75,
+      "flags": [
+        "crosswalk_by_name"
+      ],
+      "candidates": [],
+      "matched_on": "470(i)"
+    },
+    {
+      "item_id": 10,
+      "canonical_ins": "551",
+      "eu_canonical_id": "551",
+      "classification": "additive",
+      "normalised_role": "Anticaking agent",
+      "codex_functional_classes": [
+        "Anticaking agent",
+        "Carrier",
+        "Antifoaming agent"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "551"
+    },
+    {
+      "item_id": 11,
+      "canonical_ins": null,
+      "eu_canonical_id": null,
+      "classification": "food_ingredient",
+      "normalised_role": null,
+      "codex_functional_classes": [],
+      "resolution_method": "food_lexicon",
+      "resolution_confidence": 0.95,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "Starch"
+    },
+    {
+      "item_id": 12,
+      "canonical_ins": "627",
+      "eu_canonical_id": "627",
+      "classification": "additive",
+      "normalised_role": "Flavour enhancer",
+      "codex_functional_classes": [
+        "Flavour enhancer"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "627"
+    },
+    {
+      "item_id": 13,
+      "canonical_ins": "631",
+      "eu_canonical_id": "631",
+      "classification": "additive",
+      "normalised_role": "Flavour enhancer",
+      "codex_functional_classes": [
+        "Flavour enhancer"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "631"
+    },
+    {
+      "item_id": 14,
+      "canonical_ins": "330",
+      "eu_canonical_id": "330",
+      "classification": "additive",
+      "normalised_role": "Acidity regulator",
+      "codex_functional_classes": [
+        "Acidity regulator",
+        "Antioxidant",
+        "Colour-retention agent"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "330"
+    },
+    {
+      "item_id": 15,
+      "canonical_ins": "471",
+      "eu_canonical_id": "471",
+      "classification": "additive",
+      "normalised_role": "Emulsifier, Stabilizer",
+      "codex_functional_classes": [
+        "Emulsifier",
+        "Glazing agent"
+      ],
+      "resolution_method": "code_exact",
+      "resolution_confidence": 0.98,
+      "flags": [],
+      "candidates": [],
+      "matched_on": "471"
+    }
+  ],
+  "warnings": [],
+  "index_version": "178af7a7517d"
+}

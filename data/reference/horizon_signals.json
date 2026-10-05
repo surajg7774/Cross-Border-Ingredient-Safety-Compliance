@@ -1,0 +1,60 @@
+{
+  "_meta": {
+    "source": "Hand-curated from EFSA published opinions and European Commission calls for data. NOT automatically ingested -- see docs/findings.md F-12 for why.",
+    "review_status": "DRAFT -- every doi MUST be verified against efsa.europa.eu before this file is used in a report. Entries with doi_verified false are unverified.",
+    "retrieved": "2026-08-01",
+    "coverage": "PARTIAL. Covers additives known to be under review at time of curation. Absence of a signal does NOT mean an additive is not under review."
+  },
+  "signals": [
+    {
+      "eu_canonical_id": "171",
+      "substance_name": "Titanium dioxide",
+      "stage": "efsa_opinion",
+      "year": 2021,
+      "title": "Safety assessment of titanium dioxide (E171) as a food additive",
+      "doi": null,
+      "doi_verified": false,
+      "note": "EFSA concluded E171 could no longer be considered safe; delisted by Commission Regulation 2022/63"
+    },
+    {
+      "eu_canonical_id": "955",
+      "substance_name": "Sucralose",
+      "stage": "efsa_opinion",
+      "year": 2026,
+      "title": "Re-evaluation of sucralose (E 955) as a food additive",
+      "doi": null,
+      "doi_verified": false,
+      "note": "Re-evaluation plus proposed extension of use in food category 7.2"
+    },
+    {
+      "eu_canonical_id": "249",
+      "substance_name": "Potassium nitrite",
+      "stage": "efsa_opinion",
+      "year": 2023,
+      "title": "Re-evaluation of nitrites and nitrates as food additives",
+      "doi": null,
+      "doi_verified": false,
+      "note": "E249-E252 group re-evaluation"
+    },
+    {
+      "eu_canonical_id": "951",
+      "substance_name": "Aspartame",
+      "stage": "efsa_opinion",
+      "year": 2013,
+      "title": "Scientific Opinion on the re-evaluation of aspartame (E 951) as a food additive",
+      "doi": null,
+      "doi_verified": false,
+      "note": "Full ADI re-evaluation; EFSA reaffirmed the 40 mg/kg bw/day ADI. Revisited again by EFSA/WHO/IARC in 2023 following IARC's carcinogenicity classification"
+    },
+    {
+      "eu_canonical_id": "954",
+      "substance_name": "Saccharin",
+      "stage": "efsa_opinion",
+      "year": 2020,
+      "title": "Re-evaluation of saccharin and sodium saccharin (E 954) as food additives",
+      "doi": null,
+      "doi_verified": false,
+      "note": "Part of the EFSA re-evaluation programme for sweeteners authorised before 2009"
+    }
+  ]
+}
